@@ -34,6 +34,7 @@ services:
 
   vllm:
     image: vllm/vllm-openai:latest
+    runtime: nvidia
     container_name: dyno_vllm
     command: >
       --model meta-llama/Llama-2-7b-chat-hf
