@@ -34,8 +34,10 @@ services:
 
   vllm:
     image: vllm/vllm-openai:latest
-    runtime: nvidia
     container_name: dyno_vllm
+    runtime: nvidia
+    environment:
+      - HUGGINGFACE_HUB_TOKEN=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
     command: >
       --model meta-llama/Llama-2-7b-chat-hf
       --host 0.0.0.0
