@@ -1,5 +1,6 @@
 version: '3.9'
 
+
 services:
   db:
     image: postgres:15
@@ -36,11 +37,14 @@ services:
     image: vllm/vllm-openai:latest
     container_name: dyno_vllm
     runtime: nvidia
+    network_mode: bridge
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
     command: >
       --model RedHatAI/Llama-3.2-3B-Instruct-quantized.w8a8
       --host 0.0.0.0
+      --max_seq_len 61552
+      --gpu_memory_utilization 0.95
     ports:
       - "8001:8000"
     deploy:
