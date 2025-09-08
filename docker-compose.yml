@@ -37,7 +37,7 @@ services:
     container_name: dyno_vllm
     runtime: nvidia
     environment:
-      - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
     command: >
       --model meta-llama/Llama-2-7b-chat-hf
       --host 0.0.0.0
@@ -51,7 +51,7 @@ services:
               count: all
               capabilities: [gpu]
     volumes:
-      - ~/.huggingface:/root/.huggingface:ro
+      #- ~/.huggingface:/root/.huggingface:ro
       - ~/.cache/huggingface:/root/.cache/huggingface
     dns: 
       - 8.8.8.8
