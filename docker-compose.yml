@@ -50,3 +50,5 @@ services:
               capabilities: [gpu]
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
+    dns: 
+      - 8.8.8.8
