@@ -43,7 +43,7 @@ services:
     command: >
       --model RedHatAI/Llama-3.2-3B-Instruct-quantized.w8a8
       --host 0.0.0.0
-      --max_seq_len 61552
+      --max_model_len 60000
       --gpu_memory_utilization 0.95
     ports:
       - "8001:8000"
