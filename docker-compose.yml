@@ -39,7 +39,7 @@ services:
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
     command: >
-      --model meta-llama/Llama-2-7b-chat-hf
+      --model RedHatAI/Llama-3.2-3B-Instruct-quantized.w8a8
       --quantization int8
       --host 0.0.0.0
     ports:
