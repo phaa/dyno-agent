@@ -40,6 +40,7 @@ services:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
     command: >
       --model meta-llama/Llama-2-7b-chat-hf
+      --quantization int8
       --host 0.0.0.0
     ports:
       - "8001:8000"
