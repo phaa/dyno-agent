@@ -20,8 +20,10 @@ services:
     container_name: dyno_fastapi
     environment:
       DATABASE_URL: postgres://dyno_user:dyno_pass@db:5432/dyno_db
+      VLLM_URL: http://vllm:8080/v1
     depends_on:
       - db
+      - vllm
     ports:
       - "8000:8000"
 
