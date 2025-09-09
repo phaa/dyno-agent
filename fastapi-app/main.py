@@ -5,7 +5,7 @@ from models import ChatRequest
 
 client = OpenAI(
     api_key="EMPTY",
-    base_url=os.getenv("VLLM_URL", "http://vllm:8080/v1")
+    base_url=os.getenv("VLLM_URL", "http://vllm:8000/v1")
 )
 
 app = FastAPI()
