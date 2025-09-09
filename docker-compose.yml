@@ -36,8 +36,8 @@ services:
     image: vllm/vllm-openai:latest
     container_name: dyno_vllm
     runtime: nvidia
-    environment:
-      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+    env_file:
+      - .env
     command: >
       --model RedHatAI/Llama-3.2-3B-Instruct-quantized.w8a8
       --host 0.0.0.0
