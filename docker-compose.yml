@@ -36,7 +36,6 @@ services:
     image: vllm/vllm-openai:latest
     container_name: dyno_vllm
     runtime: nvidia
-    network_mode: bridge
     environment:
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
     command: >
