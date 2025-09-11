@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiando o código do app
 COPY . .
+COPY migrations ./migrations
 
 # Expondo a porta que o FastAPI vai rodar
 EXPOSE 8000

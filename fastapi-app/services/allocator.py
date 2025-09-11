@@ -4,7 +4,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 
-from ..models import Dyno, Allocation, Vehicle
+from models import Dyno, Allocation, Vehicle
 
 async def find_available_dynos(
     db: AsyncSession,
@@ -57,44 +57,43 @@ async def allocate_dyno_transactional(
     start_date: date,
     end_date: date,
 ):
-    # operação transacional com FOR UPDATE para evitar double-booking
-    async with db.begin():
-        # lock dyno row
-        q = select(Dyno).where(Dyno.id == dyno_id).with_for_update()
-        dyno = (await db.execute(q)).scalar_one_or_none()
-        if dyno is None or not dyno.enabled:
-            raise Exception("Dyno not available (gone or disabled).")
+    
+    # lock dyno row
+    q = select(Dyno).where(Dyno.id == dyno_id).with_for_update()
+    dyno = (await db.execute(q)).scalar_one_or_none()
+    if dyno is None or not dyno.enabled:
+        raise Exception("Dyno not available (gone or disabled).")
 
-        # re-check overlap
-        conflict_q = (
-            select(Allocation)
-            .where(
-                Allocation.dyno_id == dyno_id,
-                Allocation.status != "cancelled",
-                not_(
-                    or_(
-                        Allocation.end_date < start_date,
-                        Allocation.start_date > end_date,
-                    )
-                ),
-            )
-            .limit(1)
+    # re-check overlap
+    conflict_q = (
+        select(Allocation)
+        .where(
+            Allocation.dyno_id == dyno_id,
+            Allocation.status != "cancelled",
+            not_(
+                or_(
+                    Allocation.end_date < start_date,
+                    Allocation.start_date > end_date,
+                )
+            ),
         )
-        conflict = (await db.execute(conflict_q)).scalar_one_or_none()
-        if conflict:
-            raise Exception("Dyno already booked for the requested interval.")
+        .limit(1)
+    )
+    conflict = (await db.execute(conflict_q)).scalar_one_or_none()
+    if conflict:
+        raise Exception("Dyno already booked for the requested interval.")
 
-        alloc = Allocation(
-            vehicle_id=vehicle_id,
-            dyno_id=dyno_id,
-            test_type=test_type,
-            start_date=start_date,
-            end_date=end_date,
-            status="scheduled",
-        )
-        db.add(alloc)
-        # commit happens at exit of context manager
-
+    alloc = Allocation(
+        vehicle_id=vehicle_id,
+        dyno_id=dyno_id,
+        test_type=test_type,
+        start_date=start_date,
+        end_date=end_date,
+        status="scheduled",
+    )
+    db.add(alloc)
+    # commit happens at exit of context manager
     # reload allocation to have id populated
+    await db.commit()
     await db.refresh(alloc)
     return alloc

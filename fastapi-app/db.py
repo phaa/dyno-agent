@@ -16,6 +16,7 @@ engine = create_async_engine(
 
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 Base = declarative_base()
+#Base.metadata.create_all(engine)
 
 async def get_db():
     async with AsyncSessionLocal() as session:

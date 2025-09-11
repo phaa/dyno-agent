@@ -18,3 +18,6 @@ class AllocationOut(BaseModel):
     start_date: date
     end_date: date
     status: str
+
+class ChatRequest(BaseModel):
+    message: str
