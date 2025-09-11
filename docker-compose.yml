@@ -16,11 +16,10 @@ services:
     build: ./fastapi-app
     container_name: dyno_fastapi
     environment:
-      DATABASE_URL: postgres://dyno_user:dyno_pass@db:5432/dyno_db
-      VLLM_URL: http://vllm:8000/v1
+      DATABASE_URL: postgresql://dyno_user:dyno_pass@db:5432/dyno_db
+      VLLM_URL: http://192.168.1.104:8000/v1
     depends_on:
       - db
-      - vllm
     ports:
       - "8000:8000"
 
@@ -31,31 +30,3 @@ services:
       - fastapi
     ports:
       - "8501:8501"
-
-  vllm:
-    image: vllm/vllm-openai:latest
-    container_name: dyno_vllm
-    runtime: nvidia
-    env_file:
-      - .env
-    command: >
-      --model RedHatAI/Llama-3.2-3B-Instruct-quantized.w8a8
-      --host 0.0.0.0
-      --max_num_seqs 16
-      --max_model_len 60000
-      --gpu_memory_utilization 0.95
-    ports:
-      - "8001:8000"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    volumes:
-      #- ~/.huggingface:/root/.huggingface:ro
-      - ~/.cache/huggingface:/root/.cache/huggingface
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4

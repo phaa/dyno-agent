@@ -3,10 +3,10 @@ import httpx
 
 st.title("Dyno Agent UI")
 
-if st.button("Say Hello"):
+if st.button("List Vehicles"):
     with httpx.Client() as client:
-        response = client.get("http://fastapi:8000/hello")
+        response = client.get("http://fastapi:8000/vehicles")
         if response.status_code == 200:
-            st.success(response.json()["message"])
+            st.write(response.json())
         else:
             st.error("Failed to get response from FastAPI")

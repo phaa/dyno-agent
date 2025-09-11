@@ -1,4 +1,7 @@
 __pycache__/
-*.pyc
 .env
 db/data/
+venv/
+*.pyc
+*.pyo
+*.pyd
