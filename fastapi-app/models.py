@@ -7,6 +7,7 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from .db import Base
 
+
 class Dyno(Base):
     __tablename__ = "dynos"
     id = Column(Integer, primary_key=True, index=True)
@@ -19,12 +20,14 @@ class Dyno(Base):
     enabled = Column(Boolean, default=True)
     allocations = relationship("Allocation", back_populates="dyno")
 
+
 class Vehicle(Base):
     __tablename__ = "vehicles"
     id = Column(Integer, primary_key=True, index=True)
     vin = Column(String, unique=True, nullable=True)
     weight_lbs = Column(Integer, nullable=False)
     drive_type = Column(String, nullable=False)  # '2WD' or 'AWD'
+
 
 class Allocation(Base):
     __tablename__ = "allocations"
