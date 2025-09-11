@@ -16,7 +16,7 @@ services:
     build: ./fastapi-app
     container_name: dyno_fastapi
     environment:
-      DATABASE_URL: postgres://dyno_user:dyno_pass@db:5432/dyno_db
+      DATABASE_URL: postgresql+asyncpg://dyno_user:dyno_pass@db:5432/dyno_db
       VLLM_URL: http://vllm:8000/v1
     depends_on:
       - db
