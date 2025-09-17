@@ -13,18 +13,18 @@ services:
       - "5432:5432"
 
   fastapi:
-    build: ./fastapi-app
+    build: ./app
     container_name: dyno_fastapi
     environment:
       DATABASE_URL: postgresql+asyncpg://dyno_user:dyno_pass@db:5432/dyno_db
-      VLLM_URL: http://192.168.1.104:8000/v1
+      VLLM_URL: http://192.168.1.104:8001/v1
     depends_on:
       - db
     ports:
       - "8000:8000"
     volumes:
-      - ./fastapi-app:/app
-      - ./fastapi-app/migrations:/app/migrations # monta migrations em tempo de execução
+      - ./app:/app # monta a pasta app do projeto na pasta app do container
+      - ./app/migrations:/app/migrations # monta migrations em tempo de execução
 
   streamlit:
     build: ./ui

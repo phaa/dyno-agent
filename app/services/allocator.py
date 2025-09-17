@@ -4,7 +4,9 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 
-from models import Dyno, Allocation, Vehicle
+from models.dyno import Dyno
+from models.allocation import Allocation
+from models.vehicle import Vehicle
 
 async def find_available_dynos(
     db: AsyncSession,

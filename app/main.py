@@ -1,19 +1,23 @@
-import os
+from fastapi import FastAPI, Depends, HTTPException
 
 from sqlalchemy import select
-from openai import OpenAI
-from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from db import get_db
-from schemas import AllocateRequest, AllocationOut, ChatRequest
+
+from core.db import get_db
+from models.vehicle import Vehicle
+
+from schemas.allocation import AllocateRequest, AllocationOut
+from schemas.chat import ChatRequest
+
 from services.allocator import find_available_dynos, allocate_dyno_transactional
-from models import Vehicle
+
+from agents.agent import agent_executor
 
 
-client = OpenAI(
-    api_key="EMPTY",
-    base_url=os.getenv("VLLM_URL", "http://vllm:8000/v1")
-)
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logging.getLogger("langchain").setLevel(logging.DEBUG)
 
 app = FastAPI(title="Dyno Allocator API")
 
@@ -24,14 +28,8 @@ def hello():
 
 @app.post("/chat")
 def chat(request: ChatRequest):
-    response = client.chat.completions.create(
-        model="RedHatAI/Llama-3.2-3B-Instruct-quantized.w8a8",
-        messages=[
-            {"role": "user", "content": request.message}
-        ]
-    )
-    return {"response": response.choices[0].message.content}
-
+    result = agent_executor.invoke({"input": request.message})
+    return {"response": result["output"]}
 
 @app.post("/allocate", response_model=AllocationOut)
 async def allocate(req: AllocateRequest, db: AsyncSession = Depends(get_db)):

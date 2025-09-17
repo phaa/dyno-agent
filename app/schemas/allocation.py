@@ -19,5 +19,3 @@ class AllocationOut(BaseModel):
     end_date: date
     status: str
 
-class ChatRequest(BaseModel):
-    message: str

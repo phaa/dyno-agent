@@ -2,7 +2,8 @@ fastapi
 uvicorn[standard]
 httpx
 python-dotenv
-openai
+langchain
+langchain_openai
 sqlalchemy
 psycopg2-binary
 alembic
