@@ -2,10 +2,8 @@ services:
   db:
     image: postgres:15
     container_name: dyno_postgres
-    environment:
-      POSTGRES_USER: dyno_user
-      POSTGRES_PASSWORD: dyno_pass
-      POSTGRES_DB: dyno_db
+    env_file:
+      - .env
     volumes:
       - ./db/data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -15,9 +13,8 @@ services:
   fastapi:
     build: ./app
     container_name: dyno_fastapi
-    environment:
-      DATABASE_URL: postgresql+asyncpg://dyno_user:dyno_pass@db:5432/dyno_db
-      VLLM_URL: http://192.168.1.104:8001/v1
+    env_file:
+      - .env
     depends_on:
       - db
     ports:

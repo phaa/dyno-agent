@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 httpx
 python-dotenv
+langgraph
 langchain
 langchain_openai
 sqlalchemy

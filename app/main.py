@@ -1,4 +1,14 @@
+import os
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logging.getLogger("langchain").setLevel(logging.DEBUG)
+
 from fastapi import FastAPI, Depends, HTTPException
+from contextlib import asynccontextmanager
+
+from langgraph.checkpoint.postgres import PostgresSaver
+
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,25 +21,48 @@ from schemas.chat import ChatRequest
 
 from services.allocator import find_available_dynos, allocate_dyno_transactional
 
-from agents.agent import agent_executor
+from agents.agent import Context, create_agentw
 
 
-import logging
+checkpointer = None
+agent = None
 
-logging.basicConfig(level=logging.DEBUG)
-logging.getLogger("langchain").setLevel(logging.DEBUG)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load the checkpointer and agent
+    global checkpointer, agent
+    checkpointer = PostgresSaver.from_conn_string(os.getenv("DATABASE_URL"))
+    agent = create_agentw(checkpointer)
 
-app = FastAPI(title="Dyno Allocator API")
+    yield
+
+    # Clean up the checkpointer
+    global checkpointer
+    if checkpointer:
+        await checkpointer.aclose()
+        checkpointer = None
+
+
+app = FastAPI(title="Dyno Allocator API", lifespan=lifespan)
 
 
 @app.get("/hello")
 def hello():
     return {"message": "Hello, World!"}
 
+
 @app.post("/chat")
-def chat(request: ChatRequest):
-    result = agent_executor.invoke({"input": request.message})
-    return {"response": result["output"]}
+async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+    # fazer um  consulta e pegar os dados do usuario
+    # user = (await db.execute(select(User).where(User.id == request.user_id))).scalar_one_or_none()
+    result = await agent.ainvoke(
+        {"messages": [{"role": "user", "content": request.message}]},
+        context=Context(user_name="Pedro", db=db),
+        config={"configurable": {"thread_id": "user-123"}}, # mudar para o usuario na  secao
+        checkpointer=checkpointer, # passar o checkpointer pelo ainvoke() permite diferentes historicos para cada user
+    )
+    return result
+
 
 @app.post("/allocate", response_model=AllocationOut)
 async def allocate(req: AllocateRequest, db: AsyncSession = Depends(get_db)):

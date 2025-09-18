@@ -1,50 +1,68 @@
 import os
+from dataclasses import dataclass
+from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_openai import ChatOpenAI
-from langchain.agents import create_react_agent, AgentExecutor
-from langchain_core.prompts import PromptTemplate
-from langchain.prompts import ChatPromptTemplate
-from .tools import allocate_tool
+from langchain.agents import create_agent
+from langchain_core.messages import AnyMessage
+from langgraph.runtime import get_runtime
+from langgraph.checkpoint.postgres import PostgresSaver
+from core.config import MODEL_ID
 
-llm = ChatOpenAI(
-    model="RedHatAI/Llama-3.2-3B-Instruct-quantized.w8a8",
-    api_key="EMPTY",  # vLLM ignora a chave
-    base_url=os.getenv("VLLM_URL", "http://vllm:8000/v1"),  
-    temperature=0
+from .tools import (
+    find_available_dynos,
+    check_vehicle_allocation,
+    detect_conflicts,
+    completed_tests_count,
+    maintenance_check,
+    query_database,
 )
 
-tools = [allocate_tool]
+
+@dataclass
+class Context:
+    user_name: str
+    db: AsyncSession 
 
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are a helpful assistant who can use tools to help with simple tasks.
-You have access to these tools:
-
-{tools}
-
-The available tools are: {tool_names}
-
-Follow this format:
-
-Question: the user's question
-Thought: think about what to do
-Action: the tool to use, should be one of [{tool_names}]
-Action Input: the input to the tool
-Observation: the result of the tool
-Thought: I now know the final answer
-Final Answer: your final answer to the user's question"""),
-    ("user", "Question: {input}\n{agent_scratchpad}")
-])
+def format_prompt(state) -> list[AnyMessage]:
+    runtime = get_runtime(Context)
+    system_msg = (
+        "You are a helpful assistant. "
+        f"Address the user as {runtime.context.user_name}."
+    )
+    return [{"role": "system", "content": system_msg}] + state["messages"]
 
 
-# prompt = PromptTemplate.from_template(prompt_template)
-agent = create_react_agent(
-    llm=llm,
-    tools=tools,
-    prompt=prompt
-)
-agent_executor = AgentExecutor(
-    agent=agent,
-    tools=tools,
-    verbose=True,
-    handle_parsing_errors=True
-)
+def create_agentw(checkpointer: PostgresSaver):
+    """
+    Cria e retorna um agente configurado com LLM e ferramentas.
+    O `db: AsyncSession` deve ser injetado em runtime via config.
+    """
+
+    # cria LLM
+    llm = ChatOpenAI(
+        model=MODEL_ID,
+        api_key="EMPTY",
+        base_url=os.getenv("VLLM_URL"),
+        temperature=0,
+    )
+
+    # tools já decoradas com @tool
+    tools = [
+        find_available_dynos,
+        check_vehicle_allocation,
+        detect_conflicts,
+        completed_tests_count,
+        maintenance_check,
+        query_database,
+    ]
+
+    # cria o agente
+    agent = create_agent(
+        model=llm,
+        tools=tools,
+        prompt=format_prompt,
+        context_schema=Context  
+    )
+
+    return agent
