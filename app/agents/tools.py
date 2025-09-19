@@ -1,13 +1,21 @@
 import re
+from dataclasses import dataclass
 from langchain_core.tools import tool
 from langgraph.runtime import get_runtime
-from sqlalchemy import select, or_, extract
+from langgraph.config import get_stream_writer
+from sqlalchemy import select, or_, extract, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 from models.dyno import Dyno
 from models.allocation import Allocation
 from models.vehicle import Vehicle
-from .agent import Context
+
+
+@dataclass
+class Context:
+    user_name: str
+    db: AsyncSession 
+
 
 # ---------------------------------------
 # Find available dynos
@@ -194,12 +202,22 @@ async def query_database(sql: str):
     """Execute a safe SQL SELECT query against the database.
 
     The agent can use this to fetch information dynamically from the database without modifying data.
+    Exploring the database:
+    - You are allowed to discover table columns dynamically.
+    - You are using a PostgreSQL database.
+    - You may use queries like:
+    - SELECT * FROM table_name LIMIT 1;
+    - SELECT column_name FROM information_schema.columns WHERE table_name = 'table_name';
+    - Use these queries to understand the table structure before generating the final query.
 
     Args:
         sql: SQL SELECT statement to execute (other statements are blocked)
     Returns:
         A list of dictionaries for query results, or an error/message if the query is invalid or empty
     """
+
+    writer = get_stream_writer()
+    writer(f"Consultando baco de dados com: {sql}")
 
     runtime = get_runtime(Context)
     db = runtime.context.db

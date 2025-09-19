@@ -1,14 +1,19 @@
+import json
 import os
 import logging
+from typing import AsyncGenerator
+
+from fastapi.responses import StreamingResponse
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("langchain").setLevel(logging.DEBUG)
 
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
 from contextlib import asynccontextmanager
 
 from langgraph.checkpoint.postgres import PostgresSaver
-
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,29 +26,41 @@ from schemas.chat import ChatRequest
 
 from services.allocator import find_available_dynos, allocate_dyno_transactional
 
-from agents.agent import Context, create_agentw
+from agents.agent import create_agentw
+from agents.tools import Context
 
 
-checkpointer = None
-agent = None
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Load the checkpointer and agent
-    global checkpointer, agent
-    checkpointer = PostgresSaver.from_conn_string(os.getenv("DATABASE_URL"))
-    agent = create_agentw(checkpointer)
+    with PostgresSaver.from_conn_string(os.getenv("DATABASE_URL_2")) as checkpointer:
+        checkpointer.setup()
+        app.state.checkpointer = checkpointer
 
-    yield
+        agent = create_agentw(model="gemini")
+        app.state.agent = agent
 
-    # Clean up the checkpointer
-    global checkpointer
-    if checkpointer:
-        await checkpointer.aclose()
-        checkpointer = None
+        yield
+
+        # Clean up functions
 
 
 app = FastAPI(title="Dyno Allocator API", lifespan=lifespan)
+
+origins = [
+    "http://localhost:5173",  # front-end
+    "http://127.0.0.1:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_methods=["*"],   # Permite POST, GET, OPTIONS, etc
+    allow_headers=["*"],
+)
 
 
 @app.get("/hello")
@@ -53,15 +70,61 @@ def hello():
 
 @app.post("/chat")
 async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
-    # fazer um  consulta e pegar os dados do usuario
-    # user = (await db.execute(select(User).where(User.id == request.user_id))).scalar_one_or_none()
-    result = await agent.ainvoke(
+    result = await app.state.agent.ainvoke(
         {"messages": [{"role": "user", "content": request.message}]},
         context=Context(user_name="Pedro", db=db),
-        config={"configurable": {"thread_id": "user-123"}}, # mudar para o usuario na  secao
-        checkpointer=checkpointer, # passar o checkpointer pelo ainvoke() permite diferentes historicos para cada user
+        config={"configurable": {"thread_id": f"user-{request.user_id}"}},
+        checkpointer=app.state.checkpointer,
     )
-    return result
+
+    assistant_messages = [
+        msg.text()
+        for msg in result["messages"]
+        if isinstance(msg, AIMessage)
+    ]
+    return {"reply": " ".join(assistant_messages)}
+
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)) -> StreamingResponse:
+    """
+    Endpoint para chat com streaming SSE (Server-Sent Events).
+    Recebe uma mensagem do usuário e envia as respostas do modelo
+    em tempo real, pedaço por pedaço.
+    """
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        """
+        Gera eventos SSE a partir do agente, usando `stream_mode="updates"`.
+        Cada pedaço enviado contém a última mensagem do assistente.
+        """
+
+        # Inicia o streaming do agente
+        async for stream_mode, chunk in app.state.agent.astream(
+            {"messages": [{"role": "user", "content": request.message}]},
+            context=Context(user_name="Pedro", db=db),
+            config={"configurable": {"thread_id": f"user-{request.user_id}"}},
+            checkpointer=app.state.checkpointer,
+            stream_mode=["updates", "custom"] # values, updates, custom
+        ):
+            if stream_mode == "updates":
+                for step, data in chunk.items():
+                    assistant_msg = data["messages"][-1]
+                    if isinstance(assistant_msg, AIMessage):
+                        payload = json.dumps({'content': assistant_msg.content})
+                        yield f"data: {payload}\n\n"
+
+            elif stream_mode == "custom":   
+                payload = json.dumps({'content': chunk})
+                yield f"data: {payload}\n\n"
+
+
+        # Finaliza o stream
+        yield "data: [DONE]\n\n"
+
+    # Retorna a resposta como SSE
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
 
 
 @app.post("/allocate", response_model=AllocationOut)
@@ -110,3 +173,12 @@ async def allocate(req: AllocateRequest, db: AsyncSession = Depends(get_db)):
         end_date=alloc.end_date,
         status=alloc.status,
     )
+
+
+
+
+# pega a última mensagem gerada
+            # para usar com stream_mode="values"
+            #msg = chunk["messages"][-1]
+            #if isinstance(msg, AIMessage):
+            #    yield f"data: {json.dumps({'content': msg.content})}\n\n"
