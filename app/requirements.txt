@@ -16,3 +16,5 @@ pytest-asyncio
 
 
 langchain-google-genai
+
+pandas

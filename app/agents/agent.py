@@ -42,7 +42,7 @@ def format_prompt(state) -> list[AnyMessage]:
     return [{"role": "system", "content": system_msg}] + state["messages"]
 
 
-def create_agentw(model: str):
+def create_agentw(model: str, checkpointer):
     """
     Cria e retorna um agente configurado com LLM e ferramentas.
     O `db: AsyncSession` deve ser injetado em runtime via config.
@@ -81,7 +81,8 @@ def create_agentw(model: str):
         model=llm,
         tools=tools,
         prompt=format_prompt,
-        context_schema=Context  
+        context_schema=Context ,
+        checkpointer=checkpointer,
     )
 
     return agent
