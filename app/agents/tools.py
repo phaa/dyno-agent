@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from langchain_core.tools import tool
 from langgraph.runtime import get_runtime
 from langgraph.config import get_stream_writer
-from sqlalchemy import select, or_, extract, text
+from sqlalchemy import select, or_, and_, extract, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 from models.dyno import Dyno
@@ -16,7 +16,6 @@ class Context:
     user_name: str
     db: AsyncSession 
 
-
 # ---------------------------------------
 # Find available dynos
 # ---------------------------------------
@@ -24,7 +23,8 @@ class Context:
 async def find_available_dynos(start_date: date, end_date: date, weight_lbs: int, drive_type: str, test_type: str):
     """Find dynos available for a vehicle's test within a given date range.
 
-    This tool helps the agent determine which dynos can accommodate a vehicle based on weight, drive type, and test type.
+    This tool helps the agent determine which dynos can accommodate a vehicle 
+    based on weight, drive type, test type, and availability period.
 
     Args:
         start_date: Start date of the requested test period
@@ -33,7 +33,7 @@ async def find_available_dynos(start_date: date, end_date: date, weight_lbs: int
         drive_type: Drive type of the vehicle (e.g., 'AWD', '2WD')
         test_type: Type of test to be conducted
     Returns:
-        A list of available dynos, each as a dictionary with 'id', 'label', and 'facility'
+        A list of available dynos, each as a dictionary with 'id' and 'name'
     """
 
     runtime = get_runtime(Context)
@@ -52,19 +52,17 @@ async def find_available_dynos(start_date: date, end_date: date, weight_lbs: int
         .order_by(Dyno.max_weight_lbs)
     )
     result = await db.execute(stmt)
-    return [dict(id=d.id, label=d.label, facility=d.facility) for d in result.scalars().all()]
+    return [dict(id=d.id, name=d.name) for d in result.scalars().all()]
 
 # ---------------------------------------
 # Check vehicle allocation
 # ---------------------------------------
 @tool
-async def check_vehicle_allocation(vehicle_id: str):
+async def check_vehicle_allocation(vehicle_id: int):
     """Check if a specific vehicle is already allocated to a dyno.
 
-    The agent can use this tool to verify scheduling conflicts or get details of existing allocations.
-
     Args:
-        vehicle_id: The name or identifier of the vehicle
+        vehicle_id: The ID of the vehicle
     Returns:
         A list of strings describing allocations, or a message if no allocations exist
     """
@@ -75,8 +73,7 @@ async def check_vehicle_allocation(vehicle_id: str):
     stmt = (
         select(Allocation, Dyno)
         .join(Dyno, Dyno.id == Allocation.dyno_id)
-        .join(Vehicle, Vehicle.id == Allocation.vehicle_id)
-        .where(Vehicle.name == vehicle_id)
+        .where(Allocation.vehicle_id == vehicle_id)
     )
     result = await db.execute(stmt)
     rows = result.all()
@@ -85,7 +82,7 @@ async def check_vehicle_allocation(vehicle_id: str):
     output = []
     for alloc, dyno in rows:
         output.append(
-            f"Vehicle {vehicle_id} scheduled on dyno {dyno.label} from {alloc.start_date} to {alloc.end_date}"
+            f"Vehicle {vehicle_id} scheduled on dyno {dyno.name} from {alloc.start_date} to {alloc.end_date} (status: {alloc.status})"
         )
     return output
 
@@ -96,11 +93,9 @@ async def check_vehicle_allocation(vehicle_id: str):
 async def detect_conflicts():
     """Detect overlapping allocations across all dynos.
 
-    This tool allows the agent to identify scheduling conflicts between vehicles on the same dyno.
-
     Returns:
         A list of conflict dictionaries, each containing:
-            - 'dyno': the dyno label
+            - 'dyno': the dyno name
             - 'vehicles': list of involved vehicle IDs
             - 'overlap': overlapping date ranges
         Or a message if no conflicts are found
@@ -126,7 +121,7 @@ async def detect_conflicts():
                 continue
             if alloc_i.start_date <= alloc_j.end_date and alloc_i.end_date >= alloc_j.start_date:
                 conflicts.append({
-                    "dyno": dyno_i.label,
+                    "dyno": dyno_i.name,
                     "vehicles": [alloc_i.vehicle_id, alloc_j.vehicle_id],
                     "overlap": (alloc_i.start_date, alloc_i.end_date, alloc_j.start_date, alloc_j.end_date)
                 })
@@ -138,8 +133,6 @@ async def detect_conflicts():
 @tool
 async def completed_tests_count(weight_limit_lbs: int, month: int, year: int):
     """Count completed vehicle tests under a weight limit for a specific month and year.
-
-    The agent can use this to provide statistics or generate reports.
 
     Args:
         weight_limit_lbs: Maximum vehicle weight in pounds
@@ -171,13 +164,15 @@ async def completed_tests_count(weight_limit_lbs: int, month: int, year: int):
 # ---------------------------------------
 @tool
 async def maintenance_check():
-    """Check which dynos are currently under maintenance.
+    """Check which dynos are currently unavailable due to availability windows.
 
-    The agent can use this to avoid scheduling vehicles on dynos unavailable due to maintenance.
+    Since Dyno has 'available_from' and 'available_to' instead of explicit 
+    maintenance fields, this tool considers dynos unavailable if today's 
+    date is outside their availability window.
 
     Returns:
-        A list of strings describing dynos under maintenance with start and end dates,
-        or a message if no dynos are currently under maintenance
+        A list of strings describing dynos unavailable today,
+        or a message if all dynos are available
     """
 
     runtime = get_runtime(Context)
@@ -186,38 +181,95 @@ async def maintenance_check():
     today = date.today()
     stmt = (
         select(Dyno)
-        .where(Dyno.maintenance_start <= today, Dyno.maintenance_end >= today)
+        .where(
+            Dyno.enabled == True,
+            or_(
+                and_(Dyno.available_from != None, Dyno.available_from > today),
+                and_(Dyno.available_to != None, Dyno.available_to < today),
+            )
+        )
     )
     result = await db.execute(stmt)
     dynos = result.scalars().all()
     if not dynos:
-        return "No dynos under maintenance this week."
-    return [f"{d.label} under maintenance from {d.maintenance_start} to {d.maintenance_end}" for d in dynos]
+        return "All dynos are available today."
+    return [f"Dyno {d.name} is unavailable (outside availability window)" for d in dynos]
+
+
+@tool
+async def get_table_columns(table_name: str):
+    """Retrieve the column names of a specific table from the database.
+
+    This tool allows the agent to explore the schema dynamically without hardcoding
+    table structures. It only works for tables explicitly listed as allowed.
+
+    Args:
+        table_name (str): The name of the table to inspect.
+
+    Returns:
+        - A list of column names if the table exists and columns can be retrieved.
+        - An error message if the table is not allowed or the columns could not be fetched.
+
+    Usage:
+        Use this tool before generating a SELECT query, to discover which columns
+        are available in the target table. This ensures the agent builds valid
+        and precise queries without assuming the schema in advance.
+    """
+
+    allowed_tables = ["vehicles", "dynos", "tests"]
+
+    if table_name not in allowed_tables:
+        return f"Table {table_name} is not allowed."
+    
+    sql = f"SELECT * FROM {table_name} LIMIT 1"
+    result = await query_database(sql)
+    
+    if isinstance(result, list) and result:
+        return list(result[0].keys())
+    else:
+        return f"Could not fetch columns for table {table_name}."
+    
 
 # ---------------------------------------
 # Generic query
 # ---------------------------------------
 @tool
 async def query_database(sql: str):
-    """Execute a safe SQL SELECT query against the database.
+    """Execute a safe SQL SELECT query against the PostgreSQL database.
 
-    The agent can use this to fetch information dynamically from the database without modifying data.
+    This tool is used by the agent to fetch data dynamically without modifying it. 
+    Only SELECT statements are permitted. Any attempt to execute INSERT, UPDATE, 
+    DELETE, DROP, ALTER, or other modifying statements will be blocked.
+
     Exploring the database:
-    - You are allowed to discover table columns dynamically.
-    - You are using a PostgreSQL database.
-    - You may use queries like:
-    - SELECT * FROM table_name LIMIT 1;
-    - SELECT column_name FROM information_schema.columns WHERE table_name = 'table_name';
-    - Use these queries to understand the table structure before generating the final query.
+    - You are allowed to explore the schema dynamically.
+    - The database is PostgreSQL, so prefer PostgreSQL-style queries.
+    - To inspect a table's structure, you may use:
+      - SELECT * FROM table_name LIMIT 1;
+      - SELECT column_name, data_type 
+        FROM information_schema.columns 
+        WHERE table_name = 'table_name';
+    - Use these queries to understand the available columns and data types 
+      before building your final SELECT query.
 
     Args:
-        sql: SQL SELECT statement to execute (other statements are blocked)
+        sql (str): A SQL SELECT statement to execute. Must follow PostgreSQL syntax.
+    
     Returns:
-        A list of dictionaries for query results, or an error/message if the query is invalid or empty
+        - A list of dictionaries where each dictionary represents a row 
+          (keys are column names, values are cell data).
+        - "No results found." if the query executes successfully but returns no rows.
+        - An error message string if the query is invalid or fails to execute.
+
+    Usage:
+        Use this tool after identifying the relevant table(s) and columns. 
+        Always limit queries to the exact data needed and follow PostgreSQL syntax. 
+        Example:
+        SELECT model, weight FROM vehicles WHERE type = 'AWD';
     """
 
-    writer = get_stream_writer()
-    writer(f"Consultando baco de dados com: {sql}")
+    #writer = get_stream_writer()
+    #writer(f"Consultando baco de dados: {sql}")
 
     runtime = get_runtime(Context)
     db = runtime.context.db

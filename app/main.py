@@ -40,11 +40,10 @@ async def lifespan(app: FastAPI):
         checkpointer.setup()
         app.state.checkpointer = checkpointer
 
-        agent = create_agentw(model="gemini")
+        agent = create_agentw(model="gemini", checkpointer=checkpointer)
         app.state.agent = agent
-
+        
         yield
-
         # Clean up functions
 
 
@@ -74,7 +73,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         {"messages": [{"role": "user", "content": request.message}]},
         context=Context(user_name="Pedro", db=db),
         config={"configurable": {"thread_id": f"user-{request.user_id}"}},
-        checkpointer=app.state.checkpointer,
+        #checkpointer=app.state.checkpointer,
     )
 
     assistant_messages = [
@@ -100,11 +99,12 @@ async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)) 
         """
 
         # Inicia o streaming do agente
-        async for stream_mode, chunk in app.state.agent.astream(
-            {"messages": [{"role": "user", "content": request.message}]},
+        agent = app.state.agent
+        async for stream_mode, chunk in agent.astream(
+            input={"messages": [{"role": "user", "content": request.message}]},
             context=Context(user_name="Pedro", db=db),
             config={"configurable": {"thread_id": f"user-{request.user_id}"}},
-            checkpointer=app.state.checkpointer,
+            #checkpointer=app.state.checkpointer,
             stream_mode=["updates", "custom"] # values, updates, custom
         ):
             if stream_mode == "updates":
