@@ -63,12 +63,10 @@ async def load_dyno_rules(file_path: str):
             dyno_names = [d.strip() for d in dyno_names if d.strip()]
 
             for dyno_name in dyno_names:
-                result = await session.execute(select(Dyno).where(Dyno.name == dyno_name))
-                dyno = result.scalar_one_or_none()
+                #result = await session.execute(select(Dyno).where(Dyno.name == dyno_name)); dyno = result.scalar_one_or_none()
 
-                if not dyno:
-                    dyno = Dyno(name=dyno_name)
-                    session.add(dyno)
+                dyno = Dyno(name=dyno_name)
+                session.add(dyno)    
 
                 dyno.max_weight_class = str(row["WeightClass"]).lower()
                 dyno.supported_drive = str(row["DriveType"]).lower()

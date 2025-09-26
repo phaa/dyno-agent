@@ -5,6 +5,7 @@ from alembic import context
 
 # env vai ser executado como script, então temos que importar models como se estivesse no root
 from core.db import Base
+from models import *  
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

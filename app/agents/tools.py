@@ -77,13 +77,17 @@ async def check_vehicle_allocation(vehicle_id: int):
     )
     result = await db.execute(stmt)
     rows = result.all()
+
     if not rows:
         return f"Vehicle {vehicle_id} is not scheduled."
+    
     output = []
+
     for alloc, dyno in rows:
         output.append(
             f"Vehicle {vehicle_id} scheduled on dyno {dyno.name} from {alloc.start_date} to {alloc.end_date} (status: {alloc.status})"
         )
+        
     return output
 
 # ---------------------------------------
@@ -115,16 +119,20 @@ async def detect_conflicts():
     conflicts = []
     for i in range(len(allocations)):
         alloc_i, dyno_i = allocations[i]
+
         for j in range(i + 1, len(allocations)):
             alloc_j, dyno_j = allocations[j]
+
             if dyno_i.id != dyno_j.id:
                 continue
+
             if alloc_i.start_date <= alloc_j.end_date and alloc_i.end_date >= alloc_j.start_date:
                 conflicts.append({
                     "dyno": dyno_i.name,
                     "vehicles": [alloc_i.vehicle_id, alloc_j.vehicle_id],
                     "overlap": (alloc_i.start_date, alloc_i.end_date, alloc_j.start_date, alloc_j.end_date)
                 })
+
     return conflicts or "No conflicts found."
 
 # ---------------------------------------
@@ -277,14 +285,19 @@ async def query_database(sql: str):
     sql_clean = sql.strip().lower()
     if not sql_clean.startswith("select"):
         return "Only SELECT queries are allowed."
+    
     forbidden = re.compile(r"\b(drop|delete|update|insert|alter)\b", re.IGNORECASE)
+
     if forbidden.search(sql_clean):
         return "Query contains forbidden keywords."
+    
     try:
         result = await db.execute(text(sql))
         rows = result.fetchall()
+
         if not rows:
             return "No results found."
+        
         keys = result.keys()
         return [dict(zip(keys, row)) for row in rows]
     except Exception as e:
