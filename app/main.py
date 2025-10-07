@@ -100,6 +100,12 @@ async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)) 
 
         # Inicia o streaming do agente
         agent = app.state.agent
+
+        """ initial_state = {
+            "messages": [{"role": "user", "content": question}],
+            "db": db
+        } """
+        
         async for stream_mode, chunk in agent.astream(
             input={"messages": [{"role": "user", "content": request.message}]},
             context=Context(user_name="Pedro", db=db),

@@ -1,13 +1,13 @@
 from typing import Optional
 from langgraph.graph import MessagesState
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class GraphState(MessagesState):
-    allowed_tables: list[str]
+    user_name: str
+    db: AsyncSession
+    allowed_tables: Optional[list[str]] = None
     
-
-
-
 
 
 
