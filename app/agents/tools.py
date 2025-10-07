@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from dataclasses import dataclass
 from langchain_core.tools import tool
 from langgraph.runtime import get_runtime
@@ -16,6 +17,21 @@ class Context:
     user_name: str
     db: AsyncSession 
 
+
+
+
+@tool
+def get_datetime_now():
+    """"
+    Get current date and time when needed. 
+
+    Returns:
+        The current date and time in the format yyyy-mm-dd hh:mm:ss
+    """
+    current_datetime = datetime.now()
+    return current_datetime
+
+
 # ---------------------------------------
 # Find available dynos
 # ---------------------------------------
@@ -31,28 +47,36 @@ async def find_available_dynos(start_date: date, end_date: date, weight_lbs: int
         end_date: End date of the requested test period
         weight_lbs: Vehicle weight in pounds
         drive_type: Drive type of the vehicle (e.g., 'AWD', '2WD')
-        test_type: Type of test to be conducted
+        test_type: Type of test to be conducted (e.g., 'AWD', '2WD')
     Returns:
         A list of available dynos, each as a dictionary with 'id' and 'name'
     """
 
     runtime = get_runtime(Context)
     db = runtime.context.db
+
+    weight_class = "<10K" if weight_lbs <= 10000 else ">10K"
     
     stmt = (
         select(Dyno)
         .where(
             Dyno.enabled == True,
-            Dyno.max_weight_lbs >= weight_lbs,
-            or_(Dyno.supported_drive == drive_type, Dyno.supported_drive == "any"),
+            Dyno.supported_weight_classes.op("@>")([weight_class]),
+            Dyno.supported_drives.op("@>")([drive_type]),
             Dyno.supported_test_types.op("@>")([test_type]),  # PostgreSQL array contains
             or_(Dyno.available_from == None, Dyno.available_from <= start_date),
             or_(Dyno.available_to == None, Dyno.available_to >= end_date),
         )
-        .order_by(Dyno.max_weight_lbs)
+        .order_by(Dyno.name)
     )
     result = await db.execute(stmt)
-    return [dict(id=d.id, name=d.name) for d in result.scalars().all()]
+    return [
+        dict(
+            id=d.id, 
+            name=d.name
+        ) 
+        for d in result.scalars().all()
+    ]
 
 # ---------------------------------------
 # Check vehicle allocation
@@ -139,15 +163,11 @@ async def detect_conflicts():
 # Completed tests count
 # ---------------------------------------
 @tool
-async def completed_tests_count(weight_limit_lbs: int, month: int, year: int):
-    """Count completed vehicle tests under a weight limit for a specific month and year.
+async def completed_tests_count():
+    """Count completed vehicle tests .
 
-    Args:
-        weight_limit_lbs: Maximum vehicle weight in pounds
-        month: Month of the completed tests
-        year: Year of the completed tests
     Returns:
-        Integer: number of completed tests matching the criteria
+        Integer: number of completed tests
     """
 
     runtime = get_runtime(Context)
@@ -155,18 +175,49 @@ async def completed_tests_count(weight_limit_lbs: int, month: int, year: int):
 
     stmt = (
         select(Allocation)
-        .join(Vehicle, Vehicle.id == Allocation.vehicle_id)
+        #.join(Vehicle, Vehicle.id == Allocation.vehicle_id)
         .where(
-            Vehicle.weight_lbs <= weight_limit_lbs,
-            Allocation.status == "completed",
-            extract("month", Allocation.end_date) == month,
-            extract("year", Allocation.end_date) == year,
+            Allocation.status == "completed"
         )
     )
     result = await db.execute(stmt)
     rows = result.scalars().all()
     return len(rows)
 
+
+# ---------------------------------------
+# Completed tests count
+# ---------------------------------------
+@tool
+async def get_tests_by_status(status: str):
+    """Retrieve vehicle tests for a given status.
+
+    Args:
+        status: status of the test (e.g., 'completed', 'running', 'scheduled')
+    Returns:
+        A list of allocations, each as a dictionary with 'id', 'type', 'start', 'end'
+    """
+
+    runtime = get_runtime(Context)
+    db = runtime.context.db
+
+    stmt = (
+        select(Allocation)
+        #.join(Vehicle, Vehicle.id == Allocation.vehicle_id)
+        .where(
+            Allocation.status == status
+        )
+    )
+    result = await db.execute(stmt)
+    return [
+        dict(
+            id=allocation.id, 
+            type=allocation.test_type, 
+            start_date=allocation.start_date,
+            end_date=allocation.start_date
+        ) 
+        for allocation in result.scalars().all()
+    ]
 # ---------------------------------------
 # Maintenance check
 # ---------------------------------------
@@ -204,40 +255,6 @@ async def maintenance_check():
     return [f"Dyno {d.name} is unavailable (outside availability window)" for d in dynos]
 
 
-@tool
-async def get_table_columns(table_name: str):
-    """Retrieve the column names of a specific table from the database.
-
-    This tool allows the agent to explore the schema dynamically without hardcoding
-    table structures. It only works for tables explicitly listed as allowed.
-
-    Args:
-        table_name (str): The name of the table to inspect.
-
-    Returns:
-        - A list of column names if the table exists and columns can be retrieved.
-        - An error message if the table is not allowed or the columns could not be fetched.
-
-    Usage:
-        Use this tool before generating a SELECT query, to discover which columns
-        are available in the target table. This ensures the agent builds valid
-        and precise queries without assuming the schema in advance.
-    """
-
-    allowed_tables = ["vehicles", "dynos", "tests"]
-
-    if table_name not in allowed_tables:
-        return f"Table {table_name} is not allowed."
-    
-    sql = f"SELECT * FROM {table_name} LIMIT 1"
-    result = await query_database(sql)
-    
-    if isinstance(result, list) and result:
-        return list(result[0].keys())
-    else:
-        return f"Could not fetch columns for table {table_name}."
-    
-
 # ---------------------------------------
 # Generic query
 # ---------------------------------------
@@ -252,6 +269,8 @@ async def query_database(sql: str):
     Exploring the database:
     - You are allowed to explore the schema dynamically.
     - The database is PostgreSQL, so prefer PostgreSQL-style queries.
+    - To inspect available tables, you may use:
+      - SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema='public';
     - To inspect a table's structure, you may use:
       - SELECT * FROM table_name LIMIT 1;
       - SELECT column_name, data_type 
@@ -299,6 +318,9 @@ async def query_database(sql: str):
             return "No results found."
         
         keys = result.keys()
-        return [dict(zip(keys, row)) for row in rows]
+        return [
+            dict(zip(keys, row)) 
+            for row in rows
+        ]
     except Exception as e:
         return f"Error executing query: {str(e)}"

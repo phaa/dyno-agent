@@ -14,7 +14,9 @@ asyncpg
 pytest
 pytest-asyncio
 
-
+# Google AI Studio
 langchain-google-genai
 
+# Etl com excel
 pandas
+openpyxl

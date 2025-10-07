@@ -2,6 +2,7 @@ import os
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
+from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.messages import AnyMessage
 from langgraph.runtime import get_runtime
 from core.config import MODEL_ID, GEMINI_MODEL_ID, VLLM_URL
@@ -14,18 +15,20 @@ from .tools import (
     completed_tests_count,
     maintenance_check,
     query_database,
+    get_datetime_now
 )
 
-
+#Do not use Markdown or HTML. 
 def format_prompt(state) -> list[AnyMessage]:
     runtime = get_runtime(Context)
+
     system_msg = (
         """
         You are an assistant specialized in vehicle dynamometers. 
         You are free to use any of the given tools and query any database.
         Whenever the user asks for information, use all available tools to make the response as complete as possible.
         Always respond in plain text, using correct punctuation. 
-        Do not use Markdown or HTML. 
+        Use  markdown formatting.
         Use lists when needed 
 
         For vertical numbered lists with descriptions, use this format:
@@ -68,12 +71,14 @@ def create_agentw(model: str, checkpointer):
 
     # tools já decoradas com @tool
     tools = [
+        get_datetime_now,
         find_available_dynos,
         check_vehicle_allocation,
         detect_conflicts,
         completed_tests_count,
         maintenance_check,
         query_database,
+        
     ]
 
     # cria o agente
@@ -82,7 +87,8 @@ def create_agentw(model: str, checkpointer):
         tools=tools,
         prompt=format_prompt,
         context_schema=Context ,
-        checkpointer=checkpointer,
+        #checkpointer=checkpointer,
+        checkpointer=InMemorySaver()
     )
 
     return agent
