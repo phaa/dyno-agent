@@ -1,23 +1,14 @@
 import re
 from datetime import datetime
-from dataclasses import dataclass
 from langchain_core.tools import tool
 from langgraph.runtime import get_runtime
 from langgraph.config import get_stream_writer
 from sqlalchemy import select, or_, and_, extract, text
-from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 from models.dyno import Dyno
 from models.allocation import Allocation
 from models.vehicle import Vehicle
-
-
-@dataclass
-class Context:
-    user_name: str
-    db: AsyncSession 
-
-
+from.state import GraphState
 
 
 @tool
@@ -52,7 +43,7 @@ async def find_available_dynos(start_date: date, end_date: date, weight_lbs: int
         A list of available dynos, each as a dictionary with 'id' and 'name'
     """
 
-    runtime = get_runtime(Context)
+    runtime = get_runtime(GraphState)
     db = runtime.context.db
 
     weight_class = "<10K" if weight_lbs <= 10000 else ">10K"
@@ -91,7 +82,7 @@ async def check_vehicle_allocation(vehicle_id: int):
         A list of strings describing allocations, or a message if no allocations exist
     """
 
-    runtime = get_runtime(Context)
+    runtime = get_runtime()
     db = runtime.context.db
 
     stmt = (
@@ -129,7 +120,7 @@ async def detect_conflicts():
         Or a message if no conflicts are found
     """
 
-    runtime = get_runtime(Context)
+    runtime = get_runtime()
     db = runtime.context.db
 
     stmt = (
@@ -170,7 +161,7 @@ async def completed_tests_count():
         Integer: number of completed tests
     """
 
-    runtime = get_runtime(Context)
+    runtime = get_runtime()
     db = runtime.context.db
 
     stmt = (
@@ -198,7 +189,7 @@ async def get_tests_by_status(status: str):
         A list of allocations, each as a dictionary with 'id', 'type', 'start', 'end'
     """
 
-    runtime = get_runtime(Context)
+    runtime = get_runtime()
     db = runtime.context.db
 
     stmt = (
@@ -234,7 +225,7 @@ async def maintenance_check():
         or a message if all dynos are available
     """
 
-    runtime = get_runtime(Context)
+    runtime = get_runtime()
     db = runtime.context.db
 
     today = date.today()
@@ -269,8 +260,6 @@ async def query_database(sql: str):
     Exploring the database:
     - You are allowed to explore the schema dynamically.
     - The database is PostgreSQL, so prefer PostgreSQL-style queries.
-    - To inspect available tables, you may use:
-      - SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema='public';
     - To inspect a table's structure, you may use:
       - SELECT * FROM table_name LIMIT 1;
       - SELECT column_name, data_type 
@@ -298,7 +287,7 @@ async def query_database(sql: str):
     #writer = get_stream_writer()
     #writer(f"Consultando baco de dados: {sql}")
 
-    runtime = get_runtime(Context)
+    runtime = get_runtime()
     db = runtime.context.db
 
     sql_clean = sql.strip().lower()
@@ -317,6 +306,7 @@ async def query_database(sql: str):
         if not rows:
             return "No results found."
         
+        # Column names
         keys = result.keys()
         return [
             dict(zip(keys, row)) 

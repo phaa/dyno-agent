@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import json
 import os
 import logging
@@ -26,25 +27,25 @@ from schemas.chat import ChatRequest
 
 from services.allocator import find_available_dynos, allocate_dyno_transactional
 
-from agents.agent import create_agentw
-from agents.tools import Context
+from agents.agent import graph
 
 
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import AIMessage
+
+@dataclass
+class UserContext:
+    db: AsyncSession
+
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Load the checkpointer and agent
-    with PostgresSaver.from_conn_string(os.getenv("DATABASE_URL_2")) as checkpointer:
-        checkpointer.setup()
-        app.state.checkpointer = checkpointer
-
-        agent = create_agentw(model="gemini", checkpointer=checkpointer)
-        app.state.agent = agent
+    #app.state.agent = agent
         
-        yield
-        # Clean up functions
+    yield
+    # Clean up functions
 
 
 app = FastAPI(title="Dyno Allocator API", lifespan=lifespan)
@@ -67,7 +68,7 @@ def hello():
     return {"message": "Hello, World!"}
 
 
-@app.post("/chat")
+""" @app.post("/chat")
 async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     result = await app.state.agent.ainvoke(
         {"messages": [{"role": "user", "content": request.message}]},
@@ -82,7 +83,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         if isinstance(msg, AIMessage)
     ]
     return {"reply": " ".join(assistant_messages)}
-
+ """
 
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)) -> StreamingResponse:
@@ -92,20 +93,43 @@ async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)) 
     em tempo real, pedaço por pedaço.
     """
 
+    user_message = request.message
+    user_id = request.user_id
+
     async def event_generator() -> AsyncGenerator[str, None]:
         """
         Gera eventos SSE a partir do agente, usando `stream_mode="updates"`.
         Cada pedaço enviado contém a última mensagem do assistente.
         """
 
-        # Inicia o streaming do agente
-        agent = app.state.agent
+        inputs = {
+            "messages": [{"role": "user", "content": user_message}],
+            "user_name": "Pedro",
+        }
 
-        """ initial_state = {
-            "messages": [{"role": "user", "content": question}],
-            "db": db
-        } """
-        
+        # thread_id garante continuidade da conversa
+        config = {"configurable": {"thread_id": str(user_id)}}
+        context = UserContext(db=db)
+
+        async for stream_mode, chunk in graph.astream(inputs, config=config, context=context, stream_mode=["updates", "custom"]):
+            logger.warning(chunk)
+
+            if stream_mode == "updates":
+                for step, data in chunk.items():
+                    if data is None or "messages" not in data:
+                        continue
+
+
+                    assistant_msg = data["messages"][-1]
+                    if isinstance(assistant_msg, AIMessage):
+                        payload = json.dumps({'content': assistant_msg.content})
+                        yield f"data: {payload}\n\n"
+
+            elif stream_mode == "custom":   
+                payload = json.dumps({'content': chunk})
+                yield f"data: {payload}\n\n" 
+    
+        """ 
         async for stream_mode, chunk in agent.astream(
             input={"messages": [{"role": "user", "content": request.message}]},
             context=Context(user_name="Pedro", db=db),
@@ -122,7 +146,9 @@ async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)) 
 
             elif stream_mode == "custom":   
                 payload = json.dumps({'content': chunk})
-                yield f"data: {payload}\n\n"
+                yield f"data: {payload}\n\n" 
+                
+                """
 
 
         # Finaliza o stream
