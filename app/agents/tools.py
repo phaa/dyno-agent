@@ -257,17 +257,6 @@ async def query_database(sql: str):
     Only SELECT statements are permitted. Any attempt to execute INSERT, UPDATE, 
     DELETE, DROP, ALTER, or other modifying statements will be blocked.
 
-    Exploring the database:
-    - You are allowed to explore the schema dynamically.
-    - The database is PostgreSQL, so prefer PostgreSQL-style queries.
-    - To inspect a table's structure, you may use:
-      - SELECT * FROM table_name LIMIT 1;
-      - SELECT column_name, data_type 
-        FROM information_schema.columns 
-        WHERE table_name = 'table_name';
-    - Use these queries to understand the available columns and data types 
-      before building your final SELECT query.
-
     Args:
         sql (str): A SQL SELECT statement to execute. Must follow PostgreSQL syntax.
     

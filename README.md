@@ -1,104 +1,174 @@
-# Atenção 
-Evite docker-compose down -v em produção, pois ele remove volumes e dados persistidos.
+# Dyno-Agent
 
-# Migrations
-As migrations não são copiadas no build da imagem para evitar rebuilds desnecessários. Em vez disso, elas são montadas no container via volumes no docker-compose.yml, garantindo que o Alembic continue funcionando normalmente.
-- .dockerignore exclui fastapi-app/migrations do build.
-- O docker-compose.yml monta ./fastapi-app/migrations:/app/migrations em runtime.
-- build mais rápido, imagem mais leve, migrations continuam versionadas no repositório.
-- Para rodar migrations: _veja a seção sobre migrations_
+**MLOps and AI Engineering** project simulating an intelligent agent for **vehicle allocation on dynamometers**.  
+The system combines **structured data (SQL)** and **unstructured data (technical documentation via RAG)** to suggest intelligent allocations, considering:
 
-# Subir ou reconstruir containers
-```bash
-# Desliga containers e remove volumes (cuidado: remove dados persistidos em volumes Docker)
-docker-compose down -v
-# Sobe containers e rebuilda imagens
-docker-compose up --build
+- Test type  
+- Vehicle weight (<10k lbs or >10k lbs)  
+- Traction (2WD or AWD)  
+- Dyno availability by date  
+
+---
+
+## Architecture
+
+```
+[ Streamlit UI ]  <--->  [ FastAPI API ]  <--->  [ PostgreSQL (data) ]
+                                 |
+                                 +---> [ LangChain Agent ]
+                                        |--> [ SQL Tool (Postgres) ]
+                                        |--> [ FAISS (technical docs) ]
+                                        |--> [ vLLM (GPU LLM) ]
 ```
 
-# Visualizar logs
-```bash
-docker-compose logs -f fastapi   # Logs do FastAPI
-docker-compose logs -f db        # Logs do Postgres
-docker-compose logs -f vllm      # Logs do serviço VLLM
+- **Streamlit UI** → Interactive user interface  
+- **FastAPI** → Data orchestration, LangChain agent, and REST endpoints  
+- **PostgreSQL** → Relational database for vehicles, dynos, and allocations  
+- **LangChain Agent** → Decision logic and tool orchestration  
+- **FAISS** → Semantic search for documentation and manuals  
+- **vLLM** → Accelerated GPU inference  
+- **Docker Compose** → Multi-service local infrastructure  
+
+---
+
+## Tech Stack
+
+- **Infrastructure** → Docker, docker-compose, NVIDIA Container Toolkit  
+- **Backend** → FastAPI, SQLAlchemy, Alembic, Pydantic  
+- **Database** → PostgreSQL  
+- **AI** → LangChain, vLLM, Hugging Face Models, FAISS  
+- **Frontend** → Streamlit  
+- **MLOps** → CI/CD (GitHub Actions), Local Kubernetes (future)  
+
+---
+
+## Setup
+
+### 1. Clone the repository
+```
+git clone https://github.com/your-user/dyno-agent.git
+cd dyno-agent
 ```
 
-# Inicializar banco de dados e migrations
-```bash
-# Inicializa Alembic (apenas na primeira vez)
-alembic init migrations
+### 2. Build and run containers
+```
+docker compose up --build -d
 ```
 
-# Sempre que alterar os models
-```bash
-# Gera uma migration automaticamente comparando models x banco
-docker-compose exec fastapi alembic revision --autogenerate -m "create vehicles and dynos"
-# Aplica as migrations no banco
-docker-compose exec fastapi alembic upgrade head
+### 3. Verify running services
+- FastAPI → http://localhost:8000/docs  
+- Streamlit → http://localhost:8501  
+- PostgreSQL → localhost:5432  
+- vLLM → http://localhost:8001/v1  
+
+---
+
+## Development Workflow
+
+### Create a new migration
+```
+docker compose exec fastapi alembic revision --autogenerate -m "migration message"
+docker compose exec fastapi alembic upgrade head
 ```
 
-# Quando houver problemas de migration
-Use apenas em desenvolvimento. Não recomendado em produção sem cuidado.
-```bash
-# Entrar no container do banco para limpar a tabela de controle de migrations
-docker-compose exec db psql -U dyno_user -d dyno_db
+### Populate database with sample data
+```
+docker compose exec fastapi python scripts/seed_data.py
+```
 
-DROP TABLE alembic_version;
+### Run tests
+```
+docker compose exec fastapi pytest
+```
 
-DROP SCHEMA public CASCADE;
-CREATE SCHEMA public;
+---
 
-# Para sair do postgree
-\q 
+## Troubleshooting
 
-# Entrar no container FastAPI
-docker-compose exec fastapi bash
+### Alembic (broken migrations)
+If you encounter revision errors:
+```
+# Enter container
+docker compose exec fastapi bash
 
-# Limpar migrations antigas
+# Reset migrations (This deletes migration history)
 rm -rf migrations/versions/*
-
-# Criar nova migration inicial
-alembic revision --autogenerate -m "initial migration"
-
-# Aplicar no banco
+alembic stamp head
+alembic revision --autogenerate -m "reset migrations"
 alembic upgrade head
-
-# Confere se subiu
-\dt
 ```
 
-# Entrar nos containers em execução
-```bash
+### Accessing containers
+```
 # FastAPI
-docker-compose exec fastapi bash
+docker compose exec fastapi bash
 
-# PostgreSQL (CLI psql)
-docker-compose exec db psql -U dyno_user -d dyno_db
+# PostgreSQL
+docker compose exec db psql -U postgres -d dyno_db
 
 # Streamlit
-docker-compose exec ui bash
+docker compose exec ui bash
 ```
 
-# Executar comandos sem entrar no container
-```bash
-# Criar nova migration
-docker-compose exec fastapi alembic revision --autogenerate -m "mensagem da mudança"
-
-# Aplicar migrations
-docker-compose exec fastapi alembic upgrade head
-
-# Popular banco de dados com seed
-docker-compose exec fastapi python scripts/seed_data.py
-
-# Rodar testes
-docker-compose exec fastapi pytest
+### vLLM (GPU issues)
+1. Verify NVIDIA drivers inside container:
+```
+docker run --rm --runtime=nvidia --gpus all ubuntu nvidia-smi
+```
+2. If not working → reinstall NVIDIA Container Toolkit  
+3. Ensure `vllm` service in `docker-compose.yml` has:
+```
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 ```
 
-# Container do PostgreSQL
-```bash
-# Consultar tabelas no PostgreSQL
-docker-compose exec db psql -U dyno_user -d dyno_db -c '\dt'
-
-# Executar alguma query dentro do container
-docker-compose exec db psql -U dyno_user -d dyno_db -c "SELECT * FROM dynos;"
+### Docker Compose issues
+- Rebuild everything:
 ```
+docker compose down -v
+docker compose up --build
+```
+
+- View logs for a specific service:
+```
+docker compose logs -f fastapi
+docker compose logs -f db
+docker compose logs -f vllm
+```
+
+### FastAPI cannot connect to DB
+Ensure your `DATABASE_URL` is correctly set:
+```
+postgresql+psycopg2://postgres:postgres@db:5432/dyno_db
+```
+
+### Streamlit UI not loading
+- Check logs:
+```
+docker compose logs -f ui
+```
+- Verify port availability:
+```
+lsof -i :8501
+```
+
+---
+
+## Next Steps
+
+- [ ] Finalize allocation logic and business rules  
+- [ ] Integrate LangChain (SQL + FAISS + LLM)  
+- [ ] Expose agent via FastAPI  
+- [ ] Connect Streamlit frontend to API  
+- [ ] Add CI/CD pipeline  
+- [ ] Implement observability (Prometheus + Grafana)  
+
+---
+
+## 👨‍💻 Author
+**Pedro Henrique Azevedo** — Educational project in MLOps & AI Engineering 🚀

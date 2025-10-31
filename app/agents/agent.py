@@ -3,7 +3,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from .state import GraphState
 from .nodes import (
-    get_schema_node,
+    get_schema_node, 
     db_disabled_node,
     llm_node,
     tool_node,

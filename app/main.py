@@ -68,23 +68,6 @@ def hello():
     return {"message": "Hello, World!"}
 
 
-""" @app.post("/chat")
-async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
-    result = await app.state.agent.ainvoke(
-        {"messages": [{"role": "user", "content": request.message}]},
-        context=Context(user_name="Pedro", db=db),
-        config={"configurable": {"thread_id": f"user-{request.user_id}"}},
-        #checkpointer=app.state.checkpointer,
-    )
-
-    assistant_messages = [
-        msg.text()
-        for msg in result["messages"]
-        if isinstance(msg, AIMessage)
-    ]
-    return {"reply": " ".join(assistant_messages)}
- """
-
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)) -> StreamingResponse:
     """
@@ -103,7 +86,7 @@ async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)) 
         """
 
         inputs = {
-            "messages": [{"role": "user", "content": user_message}],
+            "messages": [{"role": "user", "content": user_message}], # trocar por HumanMessage(content=request.message)
             "user_name": "Pedro",
         }
 
@@ -112,44 +95,28 @@ async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)) 
         context = UserContext(db=db)
 
         async for stream_mode, chunk in graph.astream(inputs, config=config, context=context, stream_mode=["updates", "custom"]):
-            logger.warning(chunk)
-
             if stream_mode == "updates":
                 for step, data in chunk.items():
-                    if data is None or "messages" not in data:
+                    logger.warning(step)
+                    logger.warning(data)
+
+                    if not data or "messages" not in data:
                         continue
 
-
-                    assistant_msg = data["messages"][-1]
-                    if isinstance(assistant_msg, AIMessage):
-                        payload = json.dumps({'content': assistant_msg.content})
-                        yield f"data: {payload}\n\n"
-
-            elif stream_mode == "custom":   
-                payload = json.dumps({'content': chunk})
-                yield f"data: {payload}\n\n" 
-    
-        """ 
-        async for stream_mode, chunk in agent.astream(
-            input={"messages": [{"role": "user", "content": request.message}]},
-            context=Context(user_name="Pedro", db=db),
-            config={"configurable": {"thread_id": f"user-{request.user_id}"}},
-            #checkpointer=app.state.checkpointer,
-            stream_mode=["updates", "custom"] # values, updates, custom
-        ):
-            if stream_mode == "updates":
-                for step, data in chunk.items():
-                    assistant_msg = data["messages"][-1]
-                    if isinstance(assistant_msg, AIMessage):
-                        payload = json.dumps({'content': assistant_msg.content})
-                        yield f"data: {payload}\n\n"
+                    for msg in data["messages"]:
+                        if isinstance(msg, AIMessage) and msg.content:
+                            payload = json.dumps({
+                                "type": "assistant_message" ,
+                                "content": msg.content
+                            })
+                            yield f"data: {payload}\n\n"
 
             elif stream_mode == "custom":   
-                payload = json.dumps({'content': chunk})
+                payload = json.dumps({
+                    "type": "token",
+                    "content": chunk
+                })
                 yield f"data: {payload}\n\n" 
-                
-                """
-
 
         # Finaliza o stream
         yield "data: [DONE]\n\n"
@@ -214,3 +181,35 @@ async def allocate(req: AllocateRequest, db: AsyncSession = Depends(get_db)):
             #msg = chunk["messages"][-1]
             #if isinstance(msg, AIMessage):
             #    yield f"data: {json.dumps({'content': msg.content})}\n\n"
+
+
+
+
+
+""" 
+        async for stream_mode, chunk in agent.astream(
+            input={"messages": [{"role": "user", "content": request.message}]},
+            context=Context(user_name="Pedro", db=db),
+            config={"configurable": {"thread_id": f"user-{request.user_id}"}},
+            #checkpointer=app.state.checkpointer,
+            stream_mode=["updates", "custom"] # values, updates, custom
+        ):
+            if stream_mode == "updates":
+                for step, data in chunk.items():
+                    assistant_msg = data["messages"][-1]
+                    if isinstance(assistant_msg, AIMessage):
+                        payload = json.dumps({'content': assistant_msg.content})
+                        yield f"data: {payload}\n\n"
+
+            elif stream_mode == "custom":   
+                payload = json.dumps({'content': chunk})
+                yield f"data: {payload}\n\n" 
+                
+
+
+        
+            assistant_msg = data["messages"][-1]
+                    if isinstance(assistant_msg, AIMessage):
+                        payload = json.dumps({'content': assistant_msg.content})
+                        yield f"data: {payload}\n\n" 
+                """
