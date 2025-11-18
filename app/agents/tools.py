@@ -8,7 +8,7 @@ from datetime import date
 from models.dyno import Dyno
 from models.allocation import Allocation
 from models.vehicle import Vehicle
-from.state import GraphState
+from .state import GraphState
 
 
 @tool
@@ -209,6 +209,7 @@ async def get_tests_by_status(status: str):
         ) 
         for allocation in result.scalars().all()
     ]
+
 # ---------------------------------------
 # Maintenance check
 # ---------------------------------------
@@ -303,3 +304,5 @@ async def query_database(sql: str):
         ]
     except Exception as e:
         return f"Error executing query: {str(e)}"
+
+

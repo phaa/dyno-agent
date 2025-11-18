@@ -161,9 +161,9 @@ lsof -i :8501
 
 ## Next Steps
 
-- [ ] Finalize allocation logic and business rules  
+- [x] Finalize allocation logic and business rules  
 - [ ] Integrate LangChain (SQL + FAISS + LLM)  
-- [ ] Expose agent via FastAPI  
+- [x] Expose agent via FastAPI  
 - [ ] Connect Streamlit frontend to API  
 - [ ] Add CI/CD pipeline  
 - [ ] Implement observability (Prometheus + Grafana)  

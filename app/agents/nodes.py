@@ -16,6 +16,11 @@ from .tools import (
     query_database,
     get_datetime_now,
 )
+
+from . import tools as tools_module
+
+tools_list = dir(tools_module)  #tools_module.__dict__.values()
+
 from .state import GraphState
 
 logger = logging.getLogger(__name__)
@@ -91,7 +96,10 @@ async def get_schema_node(state: GraphState) -> GraphState:
     db = runtime.context.db
     sql_tables = "SELECT table_name FROM information_schema.tables WHERE table_schema='public';"
     result = await db.execute(text(sql_tables))
-    tables = [row[0] for row in result.fetchall()]
+    tables = [
+        row[0] 
+        for row in result.fetchall()
+    ]
 
     schema = {}
     for table in tables:
@@ -101,10 +109,12 @@ async def get_schema_node(state: GraphState) -> GraphState:
             WHERE table_name='{table}';
         """
         result = await db.execute(text(sql_columns))
-        columns = [row[0] for row in result.fetchall()]
+        columns = [
+            row[0] 
+            for row in result.fetchall()
+        ]
         schema[table] = columns
 
-    # Depois posso colocar uma  mensagem dizendo que esta consultando o banco
     return {
         "schema": schema,
     }
@@ -112,26 +122,24 @@ async def get_schema_node(state: GraphState) -> GraphState:
 
 def db_disabled_node(state: GraphState) -> GraphState:
     """Handles the case where the database is empty or unreachable."""
+
+    error_message = ("O nosso banco de dados está vazio. "
+                    "Por favor, adicione dados para que eu possa ajudar você.")
     return {
-        "messages": [
-            AIMessage(
-                content=(
-                    "O nosso banco de dados está vazio. "
-                    "Por favor, adicione dados para que eu possa ajudar você."
-                )
-            )
-        ]
+        "messages": [AIMessage(content=error_message)]
     }
 
 
 def llm_node(state: GraphState) -> GraphState:
-    """Main reasoning node powered by Gemini with tool bindings."""
+    """Main reasoning node with tool bindings."""
     user_name = state.get("user_name")
     schema = state.get("schema")
+
     msgs = [SystemMessage(content=SYSTEM.format(schema=schema, user_name=user_name))]
     msgs += state["messages"]
 
     ai: AIMessage = model_with_tools.invoke(msgs)
+
     return {"messages": [ai]}
 
 
@@ -153,4 +161,6 @@ def route_from_db(state: GraphState):
         return "llm"
     
     logger.warning("DB unavailable or no tables → routing to db_disabled.")
+
     return "db_disabled"
+    

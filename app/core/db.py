@@ -4,6 +4,7 @@ from sqlalchemy.orm import declarative_base
 
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL_CHECKPOINTER = os.getenv("DATABASE_URL_CHECKPOINTER")
 
 engine = create_async_engine(
     DATABASE_URL,

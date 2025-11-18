@@ -2,13 +2,13 @@ fastapi
 uvicorn[standard]
 httpx
 python-dotenv
-langgraph==1.0.0a3
-langchain==1.0.0a5
+langgraph
+langchain
 langchain_openai
-langgraph-checkpoint-postgres
 sqlalchemy
 psycopg2-binary
-psycopg[binary]
+psycopg[binary,pool]
+langgraph-checkpoint-postgres
 alembic
 asyncpg
 pytest
