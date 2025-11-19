@@ -6,3 +6,6 @@ venv/
 *.pyo
 *.pyd
 app/scripts/CERT_FUEL BASELINE_Gabriella.xlsm
+
+
+**/node_modules/

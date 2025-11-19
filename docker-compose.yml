@@ -23,13 +23,17 @@ services:
       - ./app:/app # monta a pasta app do projeto na pasta app do container
       - ./app/migrations:/app/migrations # monta migrations em tempo de execução
 
-  streamlit:
-    build: ./ui
-    container_name: dyno_ui
-    depends_on:
-      - fastapi
+  frontend:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile.dev
+    container_name: frontend
     ports:
-      - "8501:8501"
+      - "3000:3000"
     volumes:
-      - ./ui:/app
+      - ./ui:/app          # sincroniza código
+      - /app/node_modules        # impede sobrescrever node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true # melhora hot reload em alguns hosts
+    restart: unless-stopped
   

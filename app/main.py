@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from agents.agent import build_graph
+from app.auth.auth_bearer import JWTBearer
 from schemas.user import UserSchema
 from core.db import get_db, DATABASE_URL_CHECKPOINTER
 from models.vehicle import Vehicle
@@ -70,7 +71,7 @@ def hello():
     return {"message": "Hello, World!"}
 
 
-@app.post("/chat/stream", tags=["chat"])
+@app.post("/chat/stream", dependencies=[Depends(JWTBearer())], tags=["chat"])
 async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)) -> StreamingResponse:
     """
     Endpoint for chat with SSE (Server-Sent Events) streaming.
@@ -184,6 +185,7 @@ async def allocate(req: AllocateRequest, db: AsyncSession = Depends(get_db)):
         end_date=alloc.end_date,
         status=alloc.status,
     )
+
 
 @app.post("/register", tags=["auth"])
 async def register_user(user: UserSchema, db: AsyncSession = Depends(get_db)):
