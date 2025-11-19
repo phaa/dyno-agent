@@ -1,10 +1,14 @@
 fastapi
 uvicorn[standard]
+
+# Authentication
+PyJWT
+bcrypt
+
 httpx
 python-dotenv
 langgraph
 langchain
-langchain_openai
 sqlalchemy
 psycopg2-binary
 psycopg[binary,pool]
