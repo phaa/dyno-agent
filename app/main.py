@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from agents.agent import build_graph
-from app.auth.auth_bearer import JWTBearer
+from auth.auth_bearer import JWTBearer
 from schemas.user import UserSchema
 from core.db import get_db, DATABASE_URL_CHECKPOINTER
 from models.vehicle import Vehicle
@@ -60,7 +60,7 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_methods=["*"],   # Permite POST, GET, OPTIONS, etc
     allow_headers=["*"],
 )
@@ -71,7 +71,7 @@ def hello():
     return {"message": "Hello, World!"}
 
 
-@app.post("/chat/stream", dependencies=[Depends(JWTBearer())], tags=["chat"])
+@app.post("/chat/stream", tags=["chat"]) #dependencies=[Depends(JWTBearer())], 
 async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)) -> StreamingResponse:
     """
     Endpoint for chat with SSE (Server-Sent Events) streaming.

@@ -5,7 +5,7 @@ from langgraph.graph import END
 from sqlalchemy import text
 from core.config import GEMINI_MODEL_ID
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.agents import ToolNode
+from langgraph.prebuilt import ToolNode
 from langgraph.runtime import get_runtime
 from .tools import (
     find_available_dynos,
