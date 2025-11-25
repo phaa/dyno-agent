@@ -15,6 +15,7 @@ from .tools import (
     maintenance_check,
     query_database,
     get_datetime_now,
+    auto_allocate_vehicle
 )
 
 from . import tools as tools_module
@@ -81,6 +82,7 @@ tools = [
     completed_tests_count,
     maintenance_check,
     query_database,
+    auto_allocate_vehicle
 ]
 
 model_with_tools = llm.bind_tools(tools)

@@ -3,8 +3,9 @@ from datetime import datetime
 from langchain_core.tools import tool
 from langgraph.runtime import get_runtime
 from langgraph.config import get_stream_writer
-from sqlalchemy import select, or_, and_, extract, text
-from datetime import date
+from sqlalchemy import select, or_, and_, extract, text, not_
+from sqlalchemy.exc import SQLAlchemyError
+from datetime import timedelta, date
 from models.dyno import Dyno
 from models.allocation import Allocation
 from models.vehicle import Vehicle
@@ -306,3 +307,140 @@ async def query_database(sql: str):
         return f"Error executing query: {str(e)}"
 
 
+# ---------------------------------------
+# Auto allocate vehicle (tool)
+# ---------------------------------------
+@tool
+async def auto_allocate_vehicle(vehicle_id: int = None,
+                                vin: str = None,
+                                start_date: date = None,
+                                days_to_complete: int = None,
+                                backup: bool = False,
+                                max_backup_days: int = 7):
+    """
+    Try to automatically allocate a dyno for a vehicle.
+
+    Args:
+        vehicle_id: existing vehicle ID (preferred)
+        vin: alternative identifier; used to find vehicle if vehicle_id not provided
+        start_date: requested start date (datetime.date)
+        days_to_complete: optional override for duration in days (if None, use vehicle.days_to_complete or 1)
+        backup: if True, try subsequent days up to max_backup_days to find a slot
+        max_backup_days: how many days ahead to try when backup=True
+
+    Returns:
+        dict: { "success": bool, "message": str, "allocation": {...} }
+    """
+
+    runtime = get_runtime()
+    db = runtime.context.db
+
+    if start_date is None:
+        return {"success": False, "message": "start_date is required."}
+
+    # Resolve vehicle
+    try:
+        if vehicle_id:
+            q = select(Vehicle).where(Vehicle.id == vehicle_id)
+        elif vin:
+            q = select(Vehicle).where(Vehicle.vin == vin)
+        else:
+            return {"success": False, "message": "vehicle_id or vin must be provided."}
+
+        res = await db.execute(q)
+        vehicle = res.scalar_one_or_none()
+        if not vehicle:
+            return {"success": False, "message": "Vehicle not found."}
+    except SQLAlchemyError as e:
+        return {"success": False, "message": f"DB error while fetching vehicle: {str(e)}"}
+
+    # determine duration
+    try:
+        if days_to_complete is None:
+            days = getattr(vehicle, "days_to_complete", None) or 1
+        else:
+            days = int(days_to_complete)
+    except Exception:
+        days = 1
+
+    # helper to try a specific window
+    async def try_window(s_date: date, e_date: date):
+        # Use existing find_available_dynos tool (function defined above in this same file)
+        candidates = await find_available_dynos(s_date, e_date, vehicle.weight_lbs, vehicle.drive_type, getattr(vehicle, "preferred_test_type", None) or "brake")
+        if not candidates:
+            return None
+
+        # try to reserve first candidate using FOR UPDATE and re-check conflicts
+        for c in candidates:
+            dyno_id = c["id"]
+            # lock dyno row
+            lock_q = select(Dyno).where(Dyno.id == dyno_id).with_for_update()
+            lock_res = await db.execute(lock_q)
+            dyno = lock_res.scalar_one_or_none()
+            if not dyno or not dyno.enabled:
+                continue
+
+            # re-check overlapping allocations
+            conflict_q = (
+                select(Allocation)
+                .where(
+                    Allocation.dyno_id == dyno_id,
+                    Allocation.status != "cancelled",
+                    not_(
+                        or_(
+                            Allocation.end_date < s_date,
+                            Allocation.start_date > e_date,
+                        )
+                    ),
+                )
+                .limit(1)
+            )
+            conflict = (await db.execute(conflict_q)).scalar_one_or_none()
+            if conflict:
+                # dyno got booked meanwhile; try next candidate
+                continue
+
+            # create allocation
+            alloc = Allocation(
+                vehicle_id=vehicle.id,
+                dyno_id=dyno_id,
+                test_type=getattr(vehicle, "preferred_test_type", "brake"),
+                start_date=s_date,
+                end_date=e_date,
+                status="scheduled",
+            )
+            db.add(alloc)
+            try:
+                await db.commit()
+                await db.refresh(alloc)
+            except Exception as e:
+                # rollback and continue trying other candidates
+                await db.rollback()
+                continue
+
+            return {
+                "allocation_id": alloc.id,
+                "dyno_id": dyno.id,
+                "dyno_name": dyno.name,
+                "start_date": str(alloc.start_date),
+                "end_date": str(alloc.end_date),
+                "status": alloc.status,
+            }
+
+        return None
+
+    #  Try requested window, then backups if allowed
+    end_date = start_date + timedelta(days=days - 1)
+    result = await try_window(start_date, end_date)
+    if result:
+        return {"success": True, "message": "Allocated in requested window.", "allocation": result}
+
+    if backup:
+        for delta in range(1, max_backup_days + 1):
+            s = start_date + timedelta(days=delta)
+            e = s + timedelta(days=days - 1)
+            result = await try_window(s, e)
+            if result:
+                return {"success": True, "message": f"Allocated with backup shift of {delta} day(s).", "allocation": result}
+
+    return {"success": False, "message": "No available dynos found for request."}
