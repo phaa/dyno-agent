@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: ["main"]
 
+  
+env:
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+  DATABASE_URL_CHECKPOINTER: ${{ secrets.DATABASE_URL_CHECKPOINTER }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
