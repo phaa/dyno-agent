@@ -1,7 +1,7 @@
 import pytest
 from datetime import date
-from ..core.db import AsyncSessionLocal
-from ..agents.tools import auto_allocate_vehicle
+from core.db import AsyncSessionLocal
+from agents.tools import auto_allocate_vehicle
 import asyncio
 
 @pytest.mark.asyncio
