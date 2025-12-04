@@ -154,9 +154,7 @@ async def load_forecast(file_path: str):
         await session.commit()
 
 
-
-
-FILE_PATH = "CERT_FUEL BASELINE_Gabriella.xlsm"
+FILE_PATH = "CERT_FUEL BASELINE.xlsm"
 
 async def main():
     #await load_dyno_rules(FILE_PATH)

@@ -1,9 +1,9 @@
-import pytest
-from httpx import AsyncClient
+from fastapi.testclient import TestClient
 from main import app
 
-@pytest.mark.asyncio
-async def test_health():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
-        resp = await ac.get("/health")
-    assert resp.status_code == 200
+client = TestClient(app)
+
+def test_read_main():
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}

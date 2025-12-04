@@ -11,4 +11,6 @@ class Dyno(Base):
     supported_drives = Column(ARRAY(String), nullable=False, default=[])  # '2WD' | 'AWD' | 'any'
     supported_test_types = Column(ARRAY(String), nullable=False, default=[])
     enabled = Column(Boolean, default=True)
+    available_from = Column(Date, nullable=True)
+    available_to = Column(Date, nullable=True)
     allocations = relationship("Allocation", back_populates="dyno")

@@ -1,446 +1,200 @@
 import re
-from datetime import datetime
+from datetime import datetime, date
 from langchain_core.tools import tool
 from langgraph.runtime import get_runtime
 from langgraph.config import get_stream_writer
-from sqlalchemy import select, or_, and_, extract, text, not_
-from sqlalchemy.exc import SQLAlchemyError
-from datetime import timedelta, date
-from models.dyno import Dyno
-from models.allocation import Allocation
-from models.vehicle import Vehicle
-from .state import GraphState
+from services.allocation_service import AllocationService
+from .state import GraphState 
 
 
+# ---------------------------------------
+# Helper Function (Wrapper)
+# ---------------------------------------
+def _get_service_from_runtime():
+    """
+    Retrieves the DB session from the LangGraph runtime and initializes the AllocationService.
+    This ensures the service has access to the 'db' object (AsyncSession).
+    """
+    # We assume the GraphState or runtime context contains the 'db' object
+    runtime = get_runtime()
+    db = runtime.context.db
+    return AllocationService(db=db)
+
+
+# ---------------------------------------
+# Utility Tools (Do not require DB)
+# ---------------------------------------
 @tool
 def get_datetime_now():
-    """"
-    Get current date and time when needed. 
+    """
+    Gets the current date and time when needed.
 
     Returns:
-        The current date and time in the format yyyy-mm-dd hh:mm:ss
+        The current date and time in YYYY-MM-DD HH:MM:SS format.
     """
     current_datetime = datetime.now()
     return current_datetime
 
 
 # ---------------------------------------
-# Find available dynos
+# Dyno/Allocation Tools (Delegate to the Service)
 # ---------------------------------------
+
 @tool
 async def find_available_dynos(start_date: date, end_date: date, weight_lbs: int, drive_type: str, test_type: str):
-    """Find dynos available for a vehicle's test within a given date range.
-
-    This tool helps the agent determine which dynos can accommodate a vehicle 
-    based on weight, drive type, test type, and availability period.
+    """
+    Finds available dynos for a vehicle test within a specified date range
+    and technical compatibility.
 
     Args:
-        start_date: Start date of the requested test period
-        end_date: End date of the requested test period
+        start_date: Requested start date for the test
+        end_date: Requested end date for the test
         weight_lbs: Vehicle weight in pounds
-        drive_type: Drive type of the vehicle (e.g., 'AWD', '2WD')
-        test_type: Type of test to be conducted (e.g., 'AWD', '2WD')
+        drive_type: Vehicle drive type (e.g., 'AWD', '2WD')
+        test_type: Type of test required (e.g., 'AWD', '2WD', 'brake')
+
     Returns:
-        A list of available dynos, each as a dictionary with 'id' and 'name'
+        A list of available dynos.
     """
-
-    runtime = get_runtime(GraphState)
-    db = runtime.context.db
-
-    weight_class = "<10K" if weight_lbs <= 10000 else ">10K"
     
-    stmt = (
-        select(Dyno)
-        .where(
-            Dyno.enabled == True,
-            Dyno.supported_weight_classes.op("@>")([weight_class]),
-            Dyno.supported_drives.op("@>")([drive_type]),
-            Dyno.supported_test_types.op("@>")([test_type]),  # PostgreSQL array contains
-            or_(Dyno.available_from == None, Dyno.available_from <= start_date),
-            or_(Dyno.available_to == None, Dyno.available_to >= end_date),
-        )
-        .order_by(Dyno.name)
+    service = _get_service_from_runtime()
+    return await service.find_available_dynos_core(
+        start_date=start_date,
+        end_date=end_date,
+        weight_lbs=weight_lbs,
+        drive_type=drive_type,
+        test_type=test_type
     )
-    result = await db.execute(stmt)
-    return [
-        dict(
-            id=d.id, 
-            name=d.name
-        ) 
-        for d in result.scalars().all()
-    ]
 
-# ---------------------------------------
-# Check vehicle allocation
-# ---------------------------------------
+
 @tool
 async def check_vehicle_allocation(vehicle_id: int):
-    """Check if a specific vehicle is already allocated to a dyno.
+    """
+    Checks whether a specific vehicle is already allocated to a dyno.
 
     Args:
         vehicle_id: The ID of the vehicle
+
     Returns:
-        A list of strings describing allocations, or a message if no allocations exist
+        A list of strings describing allocations, or a message indicating none are scheduled.
     """
 
-    runtime = get_runtime()
-    db = runtime.context.db
+    service = _get_service_from_runtime()
+    return await service.check_vehicle_allocation_core(vehicle_id=vehicle_id)
 
-    stmt = (
-        select(Allocation, Dyno)
-        .join(Dyno, Dyno.id == Allocation.dyno_id)
-        .where(Allocation.vehicle_id == vehicle_id)
-    )
-    result = await db.execute(stmt)
-    rows = result.all()
 
-    if not rows:
-        return f"Vehicle {vehicle_id} is not scheduled."
-    
-    output = []
-
-    for alloc, dyno in rows:
-        output.append(
-            f"Vehicle {vehicle_id} scheduled on dyno {dyno.name} from {alloc.start_date} to {alloc.end_date} (status: {alloc.status})"
-        )
-        
-    return output
-
-# ---------------------------------------
-# Detect conflicts
-# ---------------------------------------
 @tool
 async def detect_conflicts():
-    """Detect overlapping allocations across all dynos.
+    """
+    Detects overlapping dyno allocations (conflicts) across all dynos.
 
     Returns:
-        A list of conflict dictionaries, each containing:
-            - 'dyno': the dyno name
-            - 'vehicles': list of involved vehicle IDs
-            - 'overlap': overlapping date ranges
-        Or a message if no conflicts are found
+        A list of conflict dictionaries, or a message if no conflicts are found.
     """
 
-    runtime = get_runtime()
-    db = runtime.context.db
+    service = _get_service_from_runtime()
+    return await service.detect_conflicts_core()
 
-    stmt = (
-        select(Allocation, Dyno)
-        .join(Dyno, Dyno.id == Allocation.dyno_id)
-        .where(Allocation.status != "cancelled")
-    )
-    result = await db.execute(stmt)
-    allocations = result.all()
 
-    conflicts = []
-    for i in range(len(allocations)):
-        alloc_i, dyno_i = allocations[i]
-
-        for j in range(i + 1, len(allocations)):
-            alloc_j, dyno_j = allocations[j]
-
-            if dyno_i.id != dyno_j.id:
-                continue
-
-            if alloc_i.start_date <= alloc_j.end_date and alloc_i.end_date >= alloc_j.start_date:
-                conflicts.append({
-                    "dyno": dyno_i.name,
-                    "vehicles": [alloc_i.vehicle_id, alloc_j.vehicle_id],
-                    "overlap": (alloc_i.start_date, alloc_i.end_date, alloc_j.start_date, alloc_j.end_date)
-                })
-
-    return conflicts or "No conflicts found."
-
-# ---------------------------------------
-# Completed tests count
-# ---------------------------------------
 @tool
 async def completed_tests_count():
-    """Count completed vehicle tests .
+    """
+    Counts the number of completed vehicle tests.
 
     Returns:
-        Integer: number of completed tests
+        Integer: number of completed tests.
     """
 
-    runtime = get_runtime()
-    db = runtime.context.db
-
-    stmt = (
-        select(Allocation)
-        #.join(Vehicle, Vehicle.id == Allocation.vehicle_id)
-        .where(
-            Allocation.status == "completed"
-        )
-    )
-    result = await db.execute(stmt)
-    rows = result.scalars().all()
-    return len(rows)
+    service = _get_service_from_runtime()
+    return await service.completed_tests_count_core()
 
 
-# ---------------------------------------
-# Completed tests count
-# ---------------------------------------
 @tool
 async def get_tests_by_status(status: str):
-    """Retrieve vehicle tests for a given status.
+    """
+    Retrieves vehicle tests by their test status.
 
     Args:
-        status: status of the test (e.g., 'completed', 'running', 'scheduled')
+        status: test status (e.g., 'completed', 'running', 'scheduled')
+
     Returns:
-        A list of allocations, each as a dictionary with 'id', 'type', 'start', 'end'
+        A list of allocations.
     """
 
-    runtime = get_runtime()
-    db = runtime.context.db
+    service = _get_service_from_runtime()
+    return await service.get_tests_by_status_core(status=status)
 
-    stmt = (
-        select(Allocation)
-        #.join(Vehicle, Vehicle.id == Allocation.vehicle_id)
-        .where(
-            Allocation.status == status
-        )
-    )
-    result = await db.execute(stmt)
-    return [
-        dict(
-            id=allocation.id, 
-            type=allocation.test_type, 
-            start_date=allocation.start_date,
-            end_date=allocation.start_date
-        ) 
-        for allocation in result.scalars().all()
-    ]
 
-# ---------------------------------------
-# Maintenance check
-# ---------------------------------------
 @tool
 async def maintenance_check():
-    """Check which dynos are currently unavailable due to availability windows.
-
-    Since Dyno has 'available_from' and 'available_to' instead of explicit 
-    maintenance fields, this tool considers dynos unavailable if today's 
-    date is outside their availability window.
+    """
+    Checks which dynos are currently unavailable due to maintenance 
+    or scheduled downtime.
 
     Returns:
         A list of strings describing dynos unavailable today,
-        or a message if all dynos are available
+        or a message if all are available.
     """
 
-    runtime = get_runtime()
-    db = runtime.context.db
-
-    today = date.today()
-    stmt = (
-        select(Dyno)
-        .where(
-            Dyno.enabled == True,
-            or_(
-                and_(Dyno.available_from != None, Dyno.available_from > today),
-                and_(Dyno.available_to != None, Dyno.available_to < today),
-            )
-        )
-    )
-    result = await db.execute(stmt)
-    dynos = result.scalars().all()
-    if not dynos:
-        return "All dynos are available today."
-    return [f"Dyno {d.name} is unavailable (outside availability window)" for d in dynos]
+    service = _get_service_from_runtime()
+    return await service.maintenance_check_core()
 
 
-# ---------------------------------------
-# Generic query
-# ---------------------------------------
 @tool
 async def query_database(sql: str):
-    """Execute a safe SQL SELECT query against the PostgreSQL database.
+    """
+    Executes a secure SQL SELECT query on the database.
 
-    This tool is used by the agent to fetch data dynamically without modifying it. 
-    Only SELECT statements are permitted. Any attempt to execute INSERT, UPDATE, 
-    DELETE, DROP, ALTER, or other modifying statements will be blocked.
+    This is the agent's generic query mechanism.
+    Only SELECT statements are allowed.
 
     Args:
-        sql (str): A SQL SELECT statement to execute. Must follow PostgreSQL syntax.
+        sql (str): A SQL SELECT statement to execute.
     
     Returns:
-        - A list of dictionaries where each dictionary represents a row 
-          (keys are column names, values are cell data).
-        - "No results found." if the query executes successfully but returns no rows.
-        - An error message string if the query is invalid or fails to execute.
-
-    Usage:
-        Use this tool after identifying the relevant table(s) and columns. 
-        Always limit queries to the exact data needed and follow PostgreSQL syntax. 
-        Example:
-        SELECT model, weight FROM vehicles WHERE type = 'AWD';
+        - A list of dictionaries representing rows.
+        - "No results found." if the query succeeds but returns empty.
+        - An error message in case of failure.
     """
 
-    #writer = get_stream_writer()
-    #writer(f"Consultando baco de dados: {sql}")
+    # Optional: Use get_stream_writer() if you want the query logged in the agent stream.
+    # writer = get_stream_writer()
+    # writer(f"Querying database: {sql}")
 
-    runtime = get_runtime()
-    db = runtime.context.db
-
-    sql_clean = sql.strip().lower()
-    if not sql_clean.startswith("select"):
-        return "Only SELECT queries are allowed."
-    
-    forbidden = re.compile(r"\b(drop|delete|update|insert|alter)\b", re.IGNORECASE)
-
-    if forbidden.search(sql_clean):
-        return "Query contains forbidden keywords."
-    
-    try:
-        result = await db.execute(text(sql))
-        rows = result.fetchall()
-
-        if not rows:
-            return "No results found."
-        
-        # Column names
-        keys = result.keys()
-        return [
-            dict(zip(keys, row)) 
-            for row in rows
-        ]
-    except Exception as e:
-        return f"Error executing query: {str(e)}"
+    service = _get_service_from_runtime()
+    return await service.query_database_core(sql=sql)
 
 
-# ---------------------------------------
-# Auto allocate vehicle (tool)
-# ---------------------------------------
 @tool
-async def auto_allocate_vehicle(vehicle_id: int = None,
-                                vin: str = None,
-                                start_date: date = None,
-                                days_to_complete: int = None,
-                                backup: bool = False,
-                                max_backup_days: int = 7):
+async def auto_allocate_vehicle(
+    vehicle_id: int = None,
+    vin: str = None,
+    start_date: date = None,
+    days_to_complete: int = None,
+    backup: bool = False,
+    max_backup_days: int = 7
+):
     """
-    Try to automatically allocate a dyno for a vehicle.
+    Attempts to automatically allocate a dyno for a vehicle.
 
     Args:
-        vehicle_id: existing vehicle ID (preferred)
-        vin: alternative identifier; used to find vehicle if vehicle_id not provided
-        start_date: requested start date (datetime.date)
-        days_to_complete: optional override for duration in days (if None, use vehicle.days_to_complete or 1)
-        backup: if True, try subsequent days up to max_backup_days to find a slot
-        max_backup_days: how many days ahead to try when backup=True
+        vehicle_id: Existing vehicle ID (preferred)
+        vin: Alternative identifier
+        start_date: Requested start date (datetime.date)
+        days_to_complete: Duration in days
+        backup: If true, attempts subsequent days up to max_backup_days
+        max_backup_days: Number of future days to try when backup=True
 
     Returns:
         dict: { "success": bool, "message": str, "allocation": {...} }
     """
 
-    runtime = get_runtime()
-    db = runtime.context.db
-
-    if start_date is None:
-        return {"success": False, "message": "start_date is required."}
-
-    # Resolve vehicle
-    try:
-        if vehicle_id:
-            q = select(Vehicle).where(Vehicle.id == vehicle_id)
-        elif vin:
-            q = select(Vehicle).where(Vehicle.vin == vin)
-        else:
-            return {"success": False, "message": "vehicle_id or vin must be provided."}
-
-        res = await db.execute(q)
-        vehicle = res.scalar_one_or_none()
-        if not vehicle:
-            return {"success": False, "message": "Vehicle not found."}
-    except SQLAlchemyError as e:
-        return {"success": False, "message": f"DB error while fetching vehicle: {str(e)}"}
-
-    # determine duration
-    try:
-        if days_to_complete is None:
-            days = getattr(vehicle, "days_to_complete", None) or 1
-        else:
-            days = int(days_to_complete)
-    except Exception:
-        days = 1
-
-    # helper to try a specific window
-    async def try_window(s_date: date, e_date: date):
-        # Use existing find_available_dynos tool (function defined above in this same file)
-        candidates = await find_available_dynos(s_date, e_date, vehicle.weight_lbs, vehicle.drive_type, getattr(vehicle, "preferred_test_type", None) or "brake")
-        if not candidates:
-            return None
-
-        # try to reserve first candidate using FOR UPDATE and re-check conflicts
-        for c in candidates:
-            dyno_id = c["id"]
-            # lock dyno row
-            lock_q = select(Dyno).where(Dyno.id == dyno_id).with_for_update()
-            lock_res = await db.execute(lock_q)
-            dyno = lock_res.scalar_one_or_none()
-            if not dyno or not dyno.enabled:
-                continue
-
-            # re-check overlapping allocations
-            conflict_q = (
-                select(Allocation)
-                .where(
-                    Allocation.dyno_id == dyno_id,
-                    Allocation.status != "cancelled",
-                    not_(
-                        or_(
-                            Allocation.end_date < s_date,
-                            Allocation.start_date > e_date,
-                        )
-                    ),
-                )
-                .limit(1)
-            )
-            conflict = (await db.execute(conflict_q)).scalar_one_or_none()
-            if conflict:
-                # dyno got booked meanwhile; try next candidate
-                continue
-
-            # create allocation
-            alloc = Allocation(
-                vehicle_id=vehicle.id,
-                dyno_id=dyno_id,
-                test_type=getattr(vehicle, "preferred_test_type", "brake"),
-                start_date=s_date,
-                end_date=e_date,
-                status="scheduled",
-            )
-            db.add(alloc)
-            try:
-                await db.commit()
-                await db.refresh(alloc)
-            except Exception as e:
-                # rollback and continue trying other candidates
-                await db.rollback()
-                continue
-
-            return {
-                "allocation_id": alloc.id,
-                "dyno_id": dyno.id,
-                "dyno_name": dyno.name,
-                "start_date": str(alloc.start_date),
-                "end_date": str(alloc.end_date),
-                "status": alloc.status,
-            }
-
-        return None
-
-    #  Try requested window, then backups if allowed
-    end_date = start_date + timedelta(days=days - 1)
-    result = await try_window(start_date, end_date)
-    if result:
-        return {"success": True, "message": "Allocated in requested window.", "allocation": result}
-
-    if backup:
-        for delta in range(1, max_backup_days + 1):
-            s = start_date + timedelta(days=delta)
-            e = s + timedelta(days=days - 1)
-            result = await try_window(s, e)
-            if result:
-                return {"success": True, "message": f"Allocated with backup shift of {delta} day(s).", "allocation": result}
-
-    return {"success": False, "message": "No available dynos found for request."}
+    service = _get_service_from_runtime()
+    return await service.auto_allocate_vehicle_core(
+        vehicle_id=vehicle_id,
+        vin=vin,
+        start_date=start_date,
+        days_to_complete=days_to_complete,
+        backup=backup,
+        max_backup_days=max_backup_days
+    )

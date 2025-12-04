@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
-from agents.agent import build_graph
+from agents.graph import build_graph
 from auth.auth_bearer import JWTBearer
 from schemas.user import UserSchema
 from core.db import get_db, DATABASE_URL_CHECKPOINTER

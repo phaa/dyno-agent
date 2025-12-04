@@ -20,3 +20,7 @@ class Message(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     conversation = relationship("Conversation", back_populates="messages")
+
+
+
+# Implemetar um algoritmo para retornar as conversas mais recentes de um usuário
