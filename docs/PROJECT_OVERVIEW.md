@@ -209,5 +209,5 @@ lsof -i :8501
 
 ---
 
-## 👨‍💻 Author
+## 👨💻 Author
 **Pedro Henrique Azevedo** — Educational project in MLOps & AI Engineering 🚀

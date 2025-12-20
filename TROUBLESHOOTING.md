@@ -1,104 +1,109 @@
-# Atenção 
-Evite docker-compose down -v em produção, pois ele remove volumes e dados persistidos.
+# Troubleshooting Guide
 
-# Migrations
-As migrations não são copiadas no build da imagem para evitar rebuilds desnecessários. Em vez disso, elas são montadas no container via volumes no docker-compose.yml, garantindo que o Alembic continue funcionando normalmente.
-- .dockerignore exclui fastapi-app/migrations do build.
-- O docker-compose.yml monta ./fastapi-app/migrations:/app/migrations em runtime.
-- build mais rápido, imagem mais leve, migrations continuam versionadas no repositório.
-- Para rodar migrations: _veja a seção sobre migrations_
+## Avisos Importantes
 
-# Subir ou reconstruir containers
+- **Production**: Avoid `docker compose down -v` as it removes volumes and persisted data.
+- **Migrations**: These are mounted via volumes, not copied into the image. For faster builds.
+
+---
+
+## Docker Operations
+
+### Rebuild Everything
 ```bash
-# Desliga containers e remove volumes (cuidado: remove dados persistidos em volumes Docker)
-docker-compose down -v
-# Sobe containers e rebuilda imagens
-docker-compose up --build
+make clean        # Remove containers e volumes
+make run          # Reconstrói e inicia
 ```
 
-# Visualizar logs
+### View Logs
 ```bash
-docker-compose logs -f fastapi   # Logs do FastAPI
-docker-compose logs -f db        # Logs do Postgres
-docker-compose logs -f vllm      # Logs do serviço VLLM
+make logs                    # Todos os serviços
+docker compose logs -f fastapi   # Apenas FastAPI
+docker compose logs -f db        # Apenas PostgreSQL
 ```
 
-# Inicializar banco de dados e migrations
+---
+
+## Database & Migrations
+
+### Normal Workflow
 ```bash
-# Inicializa Alembic (apenas na primeira vez)
-alembic init migrations
+make new-migration msg="create vehicles table"
+make migrate
+make seed
 ```
 
-# Sempre que alterar os models
+### Reset Migrations (Development Only)
 ```bash
-# Gera uma migration automaticamente comparando models x banco
-docker-compose exec fastapi alembic revision --autogenerate -m "create vehicles and dynos"
-# Aplica as migrations no banco
-docker-compose exec fastapi alembic upgrade head
-```
+# 1. Enter database container
+make db-shell
 
-# Quando houver problemas de migration
-Use apenas em desenvolvimento. Não recomendado em produção sem cuidado.
-```bash
-# Entrar no container do banco para limpar a tabela de controle de migrations
-docker-compose exec db psql -U dyno_user -d dyno_db
-
+# 2. Reset database
 DROP TABLE alembic_version;
-
 DROP SCHEMA public CASCADE;
 CREATE SCHEMA public;
+\q
 
-# Para sair do postgree
-\q 
-
-# Entrar no container FastAPI
-docker-compose exec fastapi bash
-
-# Limpar migrations antigas
+# 3. Reset migrations
+docker compose exec fastapi bash
 rm -rf migrations/versions/*
-
-# Criar nova migration inicial
 alembic revision --autogenerate -m "initial migration"
-
-# Aplicar no banco
 alembic upgrade head
-
-# Confere se subiu
-\dt
 ```
 
-# Entrar nos containers em execução
+---
+
+## Container Access
+
+### Quick Access
 ```bash
-# FastAPI
-docker-compose exec fastapi bash
-
-# PostgreSQL (CLI psql)
-docker-compose exec db psql -U dyno_user -d dyno_db
-
-# Streamlit
-docker-compose exec ui bash
+make db-shell                           # PostgreSQL CLI
+docker compose exec fastapi bash       # FastAPI container
+docker compose exec ui bash            # Streamlit container
 ```
 
-# Executar comandos sem entrar no container
+### Database Queries
 ```bash
-# Criar nova migration
-docker-compose exec fastapi alembic revision --autogenerate -m "mensagem da mudança"
+# List tables
+docker compose exec db psql -U dyno_user -d dyno_db -c '\dt'
 
-# Aplicar migrations
-docker-compose exec fastapi alembic upgrade head
-
-# Popular banco de dados com seed
-docker-compose exec fastapi python scripts/seed_data.py
-
-# Rodar testes
-docker-compose exec fastapi pytest
+# Run query
+docker compose exec db psql -U dyno_user -d dyno_db -c "SELECT * FROM dynos;"
 ```
 
-# Container do PostgreSQL
-```bash
-# Consultar tabelas no PostgreSQL
-docker-compose exec db psql -U dyno_user -d dyno_db -c '\dt'
+---
 
-# Executar alguma query dentro do container
-docker-compose exec db psql -U dyno_user -d dyno_db -c "SELECT * FROM dynos;"
+## Testing
+
+```bash
+make test         # Run all tests
+make test-cov     # With coverage report
+```
+
+---
+
+## Common Issues
+
+### Port Already in Use
+```bash
+# Check what's using port 8000
+lsof -i :8000
+# Kill process if needed
+kill -9 <PID>
+```
+
+### Database Connection Issues
+```bash
+# Check if database is running
+docker compose ps
+# Restart database
+docker compose restart db
+```
+
+### Migration Conflicts
+```bash
+# Check current migration status
+docker compose exec fastapi alembic current
+# Check migration history
+docker compose exec fastapi alembic history
 ```

@@ -1,0 +1,10 @@
+# Copie este arquivo para terraform.tfvars e preencha os valores
+
+region       = "us-east-1"
+project_name = "dyno-agent"
+db_password  = "dyno_pass"
+
+# API Keys
+huggingface_token = ""
+gemini_api_key    = ""
+jwt_secret        = ""
