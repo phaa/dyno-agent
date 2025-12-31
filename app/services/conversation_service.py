@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.conversation import Conversation, Message
+from models.conversation import Conversation, Message
 
 class ConversationService:
     def __init__(self, db: AsyncSession):
