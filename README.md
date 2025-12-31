@@ -1,6 +1,6 @@
 # Dyno-Agent
 
-**MLOps and AI Engineering** project simulating an intelligent agent for **vehicle allocation on dynamometers**.  
+**MLOps and AI Engineering** project demonstrating an intelligent agent for **vehicle allocation on dynamometers**.  
 The system combines **structured data (SQL)** and **unstructured data (technical documentation via RAG)** to suggest intelligent allocations, considering:
 
 - Test type  
@@ -8,36 +8,47 @@ The system combines **structured data (SQL)** and **unstructured data (technical
 - Traction (2WD or AWD)  
 - Dyno availability by date  
 
+## About
+
+This project is inspired by real-world work performed as an AI Engineer at Ford Motor Company's Michigan Proving Grounds (MPG). The original system automated vehicle-to-dynamometer scheduling that was previously done manually through spreadsheets, saving over **100 hours of manual work monthly**.
+
+**Key Impact:**
+- Eliminated manual scheduling errors and double-bookings
+- Reduced allocation conflicts through intelligent constraint checking
+- Enabled natural language queries for occupancy reports and dyno utilization
+- Automated allocation updates and vehicle consultations via conversational AI
+- Provided real-time insights into dyno capacity and usage patterns
+
+The agentic AI approach allows engineers to interact with the system using natural language, making complex scheduling decisions accessible to non-technical staff while maintaining data integrity and operational efficiency.
+
 ---
 
 ## Architecture
 
 ```
-[ Streamlit UI ]  <--->  [ FastAPI API ]  <--->  [ PostgreSQL (data) ]
-                                 |
-                                 +---> [ LangChain Agent ]
-                                        |--> [ SQL Tool (Postgres) ]
-                                        |--> [ FAISS (technical docs) ]
-                                        |--> [ vLLM (GPU LLM) ]
+[ External UI ]  <--->  [ FastAPI API ]  <--->  [ PostgreSQL (data) ]
+                                |
+                                +---> [ LangChain Agent ]
+                                       |--> [ SQL Tool (Postgres) ]
+                                       |--> [ FAISS (technical docs) ]
+                                       |--> [ Cloud LLM APIs ]
 ```
 
-- **Streamlit UI** → Interactive user interface  
 - **FastAPI** → Data orchestration, LangChain agent, and REST endpoints  
 - **PostgreSQL** → Relational database for vehicles, dynos, and allocations  
 - **LangChain Agent** → Decision logic and tool orchestration  
 - **FAISS** → Semantic search for documentation and manuals  
-- **vLLM** → Accelerated GPU inference  
+- **Cloud LLMs** → OpenAI/Anthropic APIs for natural language processing  
 - **Docker Compose** → Multi-service local infrastructure  
 
 ---
 
 ## Tech Stack
 
-- **Infrastructure** → Docker, docker-compose, NVIDIA Container Toolkit  
+- **Infrastructure** → Docker, docker-compose  
 - **Backend** → FastAPI, SQLAlchemy, Alembic, Pydantic  
 - **Database** → PostgreSQL  
-- **AI** → LangChain, vLLM, Hugging Face Models, FAISS  
-- **Frontend** → Streamlit  
+- **AI** → LangChain, OpenAI/Anthropic APIs, FAISS  
 - **MLOps** → CI/CD (GitHub Actions), Local Kubernetes (future)  
 
 ---
@@ -45,13 +56,13 @@ The system combines **structured data (SQL)** and **unstructured data (technical
 ## Setup
 
 ### 1. Clone the repository
-```
+```bash
 git clone https://github.com/your-user/dyno-agent.git
 cd dyno-agent
 ```
 
 ### 2. Build and run containers
-```
+```bash
 make run
 # or
 docker compose up --build -d
@@ -59,9 +70,7 @@ docker compose up --build -d
 
 ### 3. Verify running services
 - FastAPI → http://localhost:8000/docs  
-- Streamlit → http://localhost:8501  
 - PostgreSQL → localhost:5432  
-- vLLM → http://localhost:8001/v1  
 
 ---
 
@@ -86,12 +95,6 @@ make db-shell                   # Access PostgreSQL
 ```bash
 make test         # Run tests
 make test-cov     # Run tests with coverage
-```
-
-### Infrastructure (AWS)
-```bash
-make infra-apply    # Deploy to AWS
-make infra-destroy  # Remove from AWS
 ```
 
 ### Utilities
@@ -122,92 +125,13 @@ make test
 
 ---
 
-## Troubleshooting
+## Additional Documentation
 
-### Alembic (broken migrations)
-If you encounter revision errors:
-```
-# Enter container
-docker compose exec fastapi bash
-
-# Reset migrations (This deletes migration history)
-rm -rf migrations/versions/*
-alembic stamp head
-alembic revision --autogenerate -m "reset migrations"
-alembic upgrade head
-```
-
-### Accessing containers
-```
-# FastAPI
-docker compose exec fastapi bash
-
-# PostgreSQL
-docker compose exec db psql -U postgres -d dyno_db
-
-# Streamlit
-docker compose exec ui bash
-```
-
-### vLLM (GPU issues)
-1. Verify NVIDIA drivers inside container:
-```
-docker run --rm --runtime=nvidia --gpus all ubuntu nvidia-smi
-```
-2. If not working → reinstall NVIDIA Container Toolkit  
-3. Ensure `vllm` service in `docker-compose.yml` has:
-```
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-```
-
-### Docker Compose issues
-- Rebuild everything:
-```
-docker compose down -v
-docker compose up --build
-```
-
-- View logs for a specific service:
-```
-docker compose logs -f fastapi
-docker compose logs -f db
-docker compose logs -f vllm
-```
-
-### FastAPI cannot connect to DB
-Ensure your `DATABASE_URL` is correctly set:
-```
-postgresql+psycopg2://postgres:postgres@db:5432/dyno_db
-```
-
-### Streamlit UI not loading
-- Check logs:
-```
-docker compose logs -f ui
-```
-- Verify port availability:
-```
-lsof -i :8501
-```
+- **Troubleshooting** → [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+- **Infrastructure** → [INFRASTRUCTURE.md](INFRASTRUCTURE.md)
+- **CI/CD** → [CICD.md](CICD.md)
 
 ---
 
-## Next Steps
-
-- [x] Finalize allocation logic and business rules  
-- [ ] Integrate LangChain (SQL + FAISS + LLM)  
-- [x] Expose agent via FastAPI  
-- [ ] Connect Streamlit frontend to API  
-- [ ] Add CI/CD pipeline  
-- [ ] Implement observability (Prometheus + Grafana)  
-
----
-
-## 👨‍💻 Author
-**Pedro Henrique Azevedo** — Educational project in MLOps & AI Engineering 🚀
+## 👨💻 Author
+**Pedro Henrique Azevedo** — Demonstrating real-world AI Engineering solutions from Ford Motor Company MPG 🚀

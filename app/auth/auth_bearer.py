@@ -21,7 +21,8 @@ class JWTBearer(HTTPBearer):
     def verify_jwt(self, jwtoken: str) -> bool:
         is_token_valid: bool = False
         try:
-            payload = decode_jwt(jwtoken)
+            # User id and expire date are inside the payload
+            payload = decode_jwt(jwtoken) 
         except:
             payload = None
         if payload:

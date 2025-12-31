@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-## Avisos Importantes
+## Warnings
 
 - **Production**: Avoid `docker compose down -v` as it removes volumes and persisted data.
 - **Migrations**: These are mounted via volumes, not copied into the image. For faster builds.

@@ -9,6 +9,7 @@ class Vehicle(Base):
     build_id = Column(String, nullable=True)
     program = Column(String, nullable=True)
     cert_team = Column(String, nullable=True)
+    weight_lbs = Column(Integer, nullable=True)
     weight_class = Column(String, nullable=True)  # '<10k' | '>10k'
     drive_type = Column(String, nullable=True)  # '2WD' | 'AWD' | 'any'
     engine = Column(String, nullable=True)  # powerpack
