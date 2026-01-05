@@ -7,7 +7,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from core.db import DATABASE_URL_CHECKPOINTER
 from exceptions import ValidationError, validation_exception_handler
-from routers import allocation, auth, chat, health
+from routers import allocation, auth, chat, health, metrics
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("langchain").setLevel(logging.DEBUG)
@@ -31,7 +31,7 @@ app = FastAPI(title="Dyno Allocator API", lifespan=lifespan)
 app.add_exception_handler(ValidationError, validation_exception_handler)
 
 origins = [
-    "http://localhost:5173",
+    "http://localhost:5173", # Allow local frontend
     "http://127.0.0.1:5173",
 ]
 
@@ -46,6 +46,7 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(allocation.router)
+app.include_router(metrics.router)
 
 
 @app.get("/", tags=["root"])

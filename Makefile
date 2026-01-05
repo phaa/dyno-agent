@@ -1,66 +1,60 @@
-PROJECT_NAME=dyno-agent
+# Dyno-Agent Makefile with Monitoring
 
-# Development (local)
-run:
-	docker compose up
+.PHONY: help run stop build clean test migrate seed monitoring
 
-build:
-	docker compose up --build
+help: ## Show this help message
+	@echo 'Usage: make [target]'
+	@echo ''
+	@echo 'Targets:'
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-stop:
-	docker compose down
+run: ## Start all services (app + monitoring)
+	docker-compose up -d
 
-restart:
-	docker compose restart
+stop: ## Stop all services
+	docker-compose down
 
-logs:
-	docker compose logs -f
+build: ## Build all containers
+	docker-compose build
 
-# Database
-db-shell:
-	docker compose exec db psql -U postgres -d dyno_db
-
-migrate:
-	docker compose exec fastapi alembic upgrade head
-
-new-migration:
-	docker compose exec fastapi alembic revision --autogenerate -m "$(msg)"
-
-seed:
-	docker compose exec fastapi python scripts/seed_data.py
-
-# Testing
-test:
-	docker compose exec fastapi pytest
-
-test-cov:
-	docker compose exec fastapi pytest --cov=app --cov-report=term --cov-report=html
-
-# Infrastructure (AWS)
-infra-init:
-	cd infra && terraform init
-
-infra-plan:
-	cd infra && terraform plan
-
-infra-apply:
-	cd infra && terraform apply
-
-infra-destroy:
-	cd infra && terraform destroy
-
-# Cleanup
-clean:
-	docker compose down -v
+clean: ## Clean containers and volumes
+	docker-compose down -v
 	docker system prune -f
 
-# Help
-help:
-	@echo "Available commands:"
-	@echo "  run          - Start all services"
-	@echo "  stop         - Stop all services"
-	@echo "  logs         - View logs"
-	@echo "  test         - Run tests"
-	@echo "  migrate      - Run DB migrations"
-	@echo "  infra-apply  - Deploy to AWS"
-	@echo "  clean        - Clean everything"
+test: ## Run tests
+	cd app && python -m pytest
+
+migrate: ## Run database migrations
+	cd app && alembic upgrade head
+
+seed: ## Seed database with test data
+	cd app && python scripts/seed_data.py
+
+monitoring: ## Start only monitoring stack
+	docker-compose up -d prometheus grafana
+
+logs: ## Show logs for all services
+	docker-compose logs -f
+
+logs-app: ## Show logs for FastAPI app
+	docker-compose logs -f fastapi
+
+logs-prometheus: ## Show Prometheus logs
+	docker-compose logs -f prometheus
+
+logs-grafana: ## Show Grafana logs
+	docker-compose logs -f grafana
+
+metrics: ## Check metrics endpoint
+	curl -s http://localhost:8000/metrics/prometheus | head -20
+
+grafana-url: ## Show Grafana URL and credentials
+	@echo "Grafana URL: http://localhost:3000"
+	@echo "Username: admin"
+	@echo "Password: admin"
+
+prometheus-url: ## Show Prometheus URL
+	@echo "Prometheus URL: http://localhost:9090"
+
+status: ## Show status of all services
+	docker-compose ps

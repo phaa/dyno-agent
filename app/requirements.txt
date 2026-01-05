@@ -24,3 +24,10 @@ langchain-google-genai
 # Etl com excel
 pandas
 openpyxl
+
+# Monitoring
+prometheus-client
+boto3
+
+# LangSmith (AI Observability)
+langsmith
