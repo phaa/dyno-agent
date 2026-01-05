@@ -9,7 +9,7 @@ help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 run: ## Start all services (app + monitoring)
-	docker-compose up -d
+	docker-compose up
 
 stop: ## Stop all services
 	docker-compose down
