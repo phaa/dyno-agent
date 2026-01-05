@@ -74,7 +74,7 @@ curl -H "Authorization: Bearer TOKEN" \
 
 ```python
 # For special business logic tracking
-from core.prometheus_metrics import prometheus_collector
+from core.prometheus_metrics import metrics_storer
 
 class YourNewService:
     @track_performance(service_name="YourNewService", include_metadata=True)
@@ -83,7 +83,7 @@ class YourNewService:
         
         # Custom business metric
         if result.get('high_value_transaction'):
-            prometheus_collector.record_custom_metric(
+            metrics_storer.record_custom_metric(
                 metric_name="high_value_transactions_total",
                 value=1,
                 labels={"service": "YourNewService"}

@@ -4,6 +4,88 @@
 
 The Dyno-Agent metrics system provides comprehensive instrumentation for production monitoring, business intelligence, and performance optimization. This system demonstrates enterprise-grade observability practices essential for senior-level AI engineering roles.
 
+## 🏗️ Production Monitoring Architecture
+
+### Deployment Options
+
+The system offers **two production monitoring strategies** to accommodate different organizational needs and budgets:
+
+**Option 1: Prometheus + Grafana (Cost-Effective)**
+- **Deployment**: ECS Fargate containers with EFS persistent storage
+- **Cost**: ~$50/month (ECS + EFS)
+- **Access**: `http://your-alb.amazonaws.com/grafana` and `/prometheus`
+- **Benefits**: Full customization, advanced PromQL queries, cost-effective
+
+**Option 2: AWS CloudWatch (Enterprise)**
+- **Deployment**: Native AWS integration via boto3
+- **Cost**: ~$1,500/month (high-frequency metrics)
+- **Access**: AWS Console CloudWatch dashboards
+- **Benefits**: Enterprise integration, native AWS features, managed service
+
+**Option 3: Hybrid Approach (Recommended)**
+- **Strategy**: Prometheus for operational metrics + CloudWatch for business metrics
+- **Cost**: ~$200/month
+- **Benefits**: Best of both worlds - cost optimization + enterprise features
+
+### Production Infrastructure
+
+```hcl
+# EFS for persistent monitoring data
+resource "aws_efs_file_system" "monitoring" {
+  creation_token = "${var.project_name}-monitoring-efs"
+  performance_mode = "generalPurpose"
+  encrypted = true
+}
+
+# Prometheus ECS service with persistent storage
+resource "aws_ecs_task_definition" "prometheus" {
+  family = "${var.project_name}-prometheus"
+  
+  volume {
+    name = "prometheus-data"
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.monitoring.id
+      access_point_id    = aws_efs_access_point.prometheus.id
+      transit_encryption = "ENABLED"
+    }
+  }
+  
+  container_definitions = jsonencode([{
+    name  = "prometheus"
+    image = "prom/prometheus:latest"
+    command = [
+      "--web.route-prefix=/prometheus",
+      "--storage.tsdb.retention.time=30d"
+    ]
+    # ... mount points and configuration
+  }])
+}
+
+# ALB routing for secure access
+resource "aws_lb_listener_rule" "prometheus" {
+  condition {
+    path_pattern {
+      values = ["/prometheus*"]
+    }
+  }
+}
+```
+
+### Access Production Monitoring
+
+```bash
+# After Terraform deployment
+terraform output grafana_url
+terraform output prometheus_url
+
+# Direct access
+open http://your-alb-endpoint.amazonaws.com/grafana    # admin/admin
+open http://your-alb-endpoint.amazonaws.com/prometheus
+
+# CloudWatch alternative
+# AWS Console > CloudWatch > Dashboards > DynoAgent/Production
+```
+
 ---
 
 ## 🎯 Business Value Demonstration

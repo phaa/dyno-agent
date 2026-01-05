@@ -107,7 +107,7 @@ async def track_conversation(self, user_message, assistant_response, ...):
 #### **Prometheus Integration**
 ```python
 # System performance metrics
-prometheus_collector.record_allocation_request(
+metrics_storer.record_method_execution(
     service_name="ChatService",
     method_name="chat_conversation",
     duration_seconds=duration_ms / 1000,

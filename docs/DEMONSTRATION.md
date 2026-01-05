@@ -40,17 +40,19 @@ open http://localhost:3000
 - Active Users: 23
 ```
 
-## **Quantified Business Impact**
+## **Projected Business Impact** 
 
-### Before vs After
+> **⚠️ Important Note**: The metrics below represent **projected values** that this system would generate in a production environment similar to Ford Motor Company's operations. These are **not current live production data**, but rather **realistic projections** based on the system's capabilities and automotive industry benchmarks.
+
+### Before vs After (Projected)
 | Metric | Manual (Excel) | AI System | Improvement |
 |--------|----------------|-----------|-------------|
 | **Time/Week** | 8-12 hours | 30 minutes | **95% reduction** |
 | **Conflicts** | 5-8 per week | 0 per week | **100% elimination** |
-| **Error Rate** | 15% | <0.1% | **99.3% improvement** |
+| **Error Rate** | 15% | <0.1% | **99% improvement** |
 | **Annual Cost** | $125K | $10K | **$115K savings** |
 
-### ROI Analysis
+### ROI Analysis (Projected)
 ```
 Development Cost: $50,000
 Annual Savings: $115,000 + $70,000 (efficiency gains)
@@ -58,15 +60,17 @@ First Year ROI: 270%
 Payback Period: 3.2 months
 ```
 
-## **Production Metrics (Live)**
+## **Expected Production Metrics**
 
-### System Performance
+> **📊 Metrics Capability**: The system is fully instrumented to collect these metrics automatically when deployed in production.
+
+### System Performance (Expected)
 - **Uptime**: 99.9% availability
 - **Response Time**: 156.7ms average
 - **Concurrency**: 50+ simultaneous users
 - **Success Rate**: 98.2% of requests
 
-### Business Intelligence
+### Business Intelligence (Projected)
 - **Hours Saved**: 100+ monthly
 - **Cost Reduction**: $47,500/month
 - **User Adoption**: 95% of engineers
@@ -75,7 +79,7 @@ Payback Period: 3.2 months
 ## **Business Impact**
 
 ### 1. Show Grafana Dashboard (2 minutes)
-*"This shows real-time business impact - we're saving $47K monthly"*
+*"This demonstrates the real-time monitoring capabilities - in production, this would show actual business impact metrics"*
 
 ### 2. Demonstrate Natural Language Interface (3 minutes)
 *"Engineers can schedule complex allocations using plain English"*
@@ -95,9 +99,7 @@ Payback Period: 3.2 months
 - **Real-time Streaming**: SSE with correlation tracking
 
 ### Production Architecture
-- **AWS ECS Fargate**: Auto-scaling deployment
-- **PostgreSQL**: Advanced constraint modeling
+- **AWS ECS**: Fargate cluster
+- **AWS RDS**: PostgreSQL for advanced constraint modeling
 - **Enterprise Security**: JWT + role-based access
 - **Full Observability**: Metrics, logs, traces
-
-This system demonstrates **enterprise-grade AI engineering** with quantified business impact and production-ready architecture.
