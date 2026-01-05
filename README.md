@@ -12,12 +12,16 @@
 
 **Dyno-Agent** is a production-grade AI system for vehicle testing operations. It reflects a little o what I've been doing at Ford Motor Company's Michigan Proving Grounds as AI Engineer. The system replaced manual Excel-based scheduling with an intelligent, conversational AI agent that handles complex vehicle-to-dynamometer allocations with multi-dimensional constraints.
 
+> **⚖️ Legal Notice**: This is an independent portfolio project that demonstrates similar concepts and technologies used in automotive testing environments. All code, data, and implementation details are original work created for educational and demonstration purposes. No proprietary Ford Motor Company code, data, or confidential information is included.
+
 ### Business Impact
-- **100+ hours saved monthly** in manual scheduling work
-- **Zero allocation conflicts** since deployment
+- **Projected 100+ hours saved monthly** in manual scheduling work
+- **Zero allocation conflicts** capability through intelligent constraint validation
 - **Real-time insights** into dyno capacity and utilization
 - **Natural language interface** accessible to non-technical staff
 - **Automated constraint validation** preventing costly scheduling errors
+
+> **Note**: Impact metrics represent projected values based on system capabilities and automotive industry benchmarks, not current live production data.
 
 ---
 
@@ -66,7 +70,7 @@ This document is the entry point for the system. You can read more detailed topi
 
 | Document | Description |
 |----------|-------------|
-| **[README](README.md)** | System Overview (You are here) |
+| **[Readme](README.md)** | System Overview (You are here) |
 | **[API Keys Setup](docs/API_KEYS_SETUP.md)** | Required API keys, LangSmith configuration, and AWS setup |
 | **[Technical Architecture](docs/TECHNICAL_ARCHITECTURE.md)** | Deep dive into system design, database architecture, and implementation details |
 | **[Agent Tools](docs/AGENT_TOOLS.md)** | Complete documentation of all 9 AI agent tools and capabilities |
@@ -86,6 +90,10 @@ This document is the entry point for the system. You can read more detailed topi
 ---
 
 ## AI Agent Capabilities
+
+The LangGraph agent orchestrates 9 specialized tools for complex operations with intelligent decision-making and real-time streaming responses.
+
+**→ See more in [Agent Tools Documentation](docs/AGENT_TOOLS.md)**
 
 ### Intelligent Tools System
 The LangGraph agent orchestrates 9 specialized tools for complex operations:
@@ -117,86 +125,48 @@ async def auto_allocate_vehicle(
 - **Conflict Resolution**: Proactive detection and resolution of scheduling conflicts
 - **Concurrency Control**: PostgreSQL row-level locking prevents race conditions
 
+**→ See more in [Agent Tools Documentation](docs/AGENT_TOOLS.md)**
+
 ---
 
 ## Technical Implementation
 
+Sophisticated database design with PostgreSQL array operators, intelligent allocation algorithms, and enterprise-grade concurrency control.
+
+**→ See more in [Technical Architecture](docs/TECHNICAL_ARCHITECTURE.md)**
+
 ### Database Design
-```sql
--- Sophisticated constraint modeling
-CREATE TABLE dynos (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR UNIQUE NOT NULL,
-    supported_weight_classes TEXT[], -- '<10k', '>10k'
-    supported_drives TEXT[],          -- '2WD', 'AWD', 'any'
-    supported_test_types TEXT[],      -- 'brake', 'emission', etc.
-    available_from DATE,              -- Maintenance windows
-    available_to DATE,
-    enabled BOOLEAN DEFAULT true
-);
-```
+SQLAlchemy 2.0 models with PostgreSQL array fields for multi-dimensional constraint matching. Features relationship mapping, automatic timestamps, and optimized indexing for high-performance queries.
 
 ### Smart Allocation Algorithm
-```python
-async def find_available_dynos_core(self, start_date, end_date, weight_lbs, drive_type, test_type):
-    """
-    Multi-constraint matching with PostgreSQL array operators:
-    - Weight class compatibility (@> operator)
-    - Drive type support validation
-    - Test type capability checking
-    - Maintenance window respect
-    - Real-time availability verification
-    """
-    weight_class = "<10K" if weight_lbs <= 10000 else ">10K"
-    
-    stmt = (
-        select(Dyno)
-        .where(
-            Dyno.enabled == True,
-            Dyno.supported_weight_classes.op("@>")([weight_class]),
-            Dyno.supported_drives.op("@>")([drive_type]),
-            Dyno.supported_test_types.op("@>")([test_type]),
-            or_(Dyno.available_from == None, Dyno.available_from <= start_date),
-            or_(Dyno.available_to == None, Dyno.available_to >= end_date),
-        )
-    )
-```
+Intelligent dyno selection using PostgreSQL `@>` array operators for compatibility matching. Handles weight classes, drive types, test requirements, and maintenance windows with sub-second response times.
 
 ### Concurrency Control
-```python
-# Race condition prevention with database locks
-async def try_allocation(self, dyno_id, start_date, end_date):
-    # Lock dyno row to prevent double-booking
-    lock_q = select(Dyno).where(Dyno.id == dyno_id).with_for_update()
-    dyno = (await self.db.execute(lock_q)).scalar_one_or_none()
-    
-    # Re-verify no conflicts exist
-    conflict_q = select(Allocation).where(
-        Allocation.dyno_id == dyno_id,
-        not_(or_(
-            Allocation.end_date < start_date,
-            Allocation.start_date > end_date,
-        ))
-    )
-    
-    if not (await self.db.execute(conflict_q)).scalar_one_or_none():
-        # Safe to allocate
-        return await self.create_allocation(...)
-```
+Race condition prevention using `SELECT ... FOR UPDATE` row-level locking. Atomic transactions with conflict re-verification ensure zero double-booking scenarios in high-concurrency environments.
 
 ---
 
 ## Getting Started
 
-### Prerequisites
+Two deployment paths: local development for feature testing, or full AWS infrastructure for evaluating production capabilities.
+
+**→ See more in [API Keys Setup](docs/API_KEYS_SETUP.md)**
+
+### Local Development Setup
+
+**For testing the system locally with Docker PostgreSQL:**
+
+> **Note**: The commands below use local Docker containers and the `Makefile` for development convenience. In production, the system uses AWS RDS PostgreSQL and different operational procedures.
+
+#### Prerequisites
 - Docker & Docker Compose
 - Python 3.11+
-- PostgreSQL 15+
+- PostgreSQL 15+ (via Docker)
 - **Gemini API key** (required)
 - **LangSmith API key** (optional - for AI observability)
 - **AWS credentials** (optional - for CloudWatch monitoring)
 
-### Quick Setup
+#### Quick Setup (Local Development)
 ```bash
 # Clone repository
 git clone https://github.com/your-username/dyno-agent.git
@@ -209,13 +179,13 @@ cp .env.example .env
 # - LANGCHAIN_API_KEY (optional)
 # - AWS credentials (optional)
 
-# Start all services (app + monitoring)
+# Start all services (app + local PostgreSQL + monitoring)
 make run
 
-# Run migrations
+# Run migrations (against local Docker PostgreSQL)
 make migrate
 
-# Seed test data
+# Seed test data (local development data)
 make seed
 
 # Access monitoring dashboards
@@ -223,15 +193,90 @@ make grafana-url    # http://localhost:3000 (admin/admin)
 make prometheus-url # http://localhost:9090
 ```
 
+#### Local Development Commands
+```bash
+# Database operations (local Docker PostgreSQL)
+make migrate        # Run Alembic migrations
+make seed          # Seed test data
+make db-shell      # Connect to local PostgreSQL
+make db-reset      # Reset local database
+
+# Application operations
+make run           # Start all services
+make logs          # View application logs
+make test          # Run test suite
+
+# Monitoring
+make grafana-url   # Open Grafana dashboard
+make prometheus-url # Open Prometheus metrics
+```
+
+### Production Deployment & CI/CD
+
+**For testing AWS deployment, Terraform infrastructure, and CI/CD pipelines:**
+
+**→ See more in [Infrastructure Guide](docs/INFRASTRUCTURE.md) | [CI/CD Pipeline](docs/CICD.md)**
+
+#### Prerequisites
+- AWS CLI configured with appropriate permissions
+- Terraform >= 1.0
+- GitHub account (for CI/CD)
+- Domain name (optional - for custom SSL)
+
+#### Infrastructure Setup
+```bash
+# 1. Configure AWS credentials
+aws configure
+
+# 2. Deploy infrastructure with Terraform
+cd infra/
+terraform init
+terraform plan
+terraform apply
+
+# 3. Set up CI/CD pipeline
+# See: docs/CICD.md for GitHub Actions setup
+```
+
+#### What will be deployed
+- **ECS Fargate** cluster
+- **RDS PostgreSQL** database
+- **Application Load Balancer** with health checks
+- **ECR** container registry
+- **Prometheus + Grafana** monitoring stack (production alternative to CloudWatch)
+- **EFS** persistent storage for monitoring data
+- **CloudWatch** monitoring (via boto3 integration)
+- **GitHub Actions** CI/CD pipeline
+- **VPC** with public/private subnets and NAT Gateway
+
+### Production Operations
+
+**For AWS deployment with RDS PostgreSQL:**
+
+Production database operations use AWS RDS instead of local Docker containers. This includes ECS-based migrations, secure database access via bastion hosts or ECS Exec, and CloudWatch monitoring.
+
+**→ See complete guide in [Infrastructure Guide - Production Operations](docs/INFRASTRUCTURE.md#production-operations-aws-rds)**
+
+
 ### API Endpoints
+
+**Local Development Examples** (replace `localhost:8000` with your production ALB endpoint):
+
 ```bash
 # Health check
 curl http://localhost:8000/health
+# Production: curl https://your-alb-endpoint.amazonaws.com/health
 
-# Authentication
+# Authentication - Register
 curl -X POST http://localhost:8000/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email": "user@example.com", "password": "secure123"}'
+
+# Authentication - Login
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "secure123"}'
+# Returns: {"access_token": "eyJ...", "token_type": "bearer"}
 
 # Chat with AI agent (SSE streaming)
 curl -X POST http://localhost:8000/chat/chat/stream \
@@ -239,43 +284,75 @@ curl -X POST http://localhost:8000/chat/chat/stream \
   -H "Content-Type: application/json" \
   -d '{"message": "Find available dynos for AWD vehicle next week"}'
 
-# Performance metrics (NEW)
+# Performance metrics
 curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   http://localhost:8000/metrics/performance?hours=24
 
-# Business impact metrics (NEW)
+# Business impact metrics
 curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   http://localhost:8000/metrics/business
 
-# Conversation metrics (NEW)
+# Conversation metrics
 curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   http://localhost:8000/chat/metrics/conversation?hours=24
 
-# Prometheus metrics (NEW)
+# Prometheus metrics (public endpoint)
 curl http://localhost:8000/metrics/prometheus
 ```
 
 ### Monitoring Dashboards
+
+**Local Development:**
 ```bash
-# Grafana Dashboard
+# Grafana Dashboard (local)
 open http://localhost:3000  # admin/admin
 
-# Prometheus Metrics
+# Prometheus Metrics (local)
 open http://localhost:9090
+```
 
-# AWS CloudWatch (if configured)
+**Production Monitoring Options:**
+
+**Option 1: Prometheus + Grafana (Cost-Effective)**
+```bash
+# Access via ALB after deployment
+open http://your-alb-endpoint.amazonaws.com/grafana    # admin/admin
+open http://your-alb-endpoint.amazonaws.com/prometheus
+
+# Get URLs from Terraform
+terraform output grafana_url
+terraform output prometheus_url
+```
+
+**Option 2: AWS CloudWatch (Enterprise)**
+```bash
+# AWS CloudWatch Console
+# Navigate to: CloudWatch > Dashboards > DynoAgent/Production
 # Namespace: DynoAgent/Production
+
+# Application Load Balancer metrics
+# CloudWatch > Metrics > ApplicationELB
+
+# RDS Database metrics
+# CloudWatch > Metrics > RDS > Per-Database Metrics
+
+# ECS Service metrics
+# CloudWatch > Metrics > ECS > ServiceName
 ```
 
 ---
 
 ## Performance Metrics
 
+Real-time system performance tracking with business impact measurement and ROI analysis.
+
+**→ See more in [Metrics & Observability](docs/METRICS_SYSTEM.md)**
+
 ### System Performance
 - **Response Time**: < 200ms for simple queries
 - **Allocation Speed**: < 2 seconds for complex multi-constraint matching
 - **Concurrency**: Handles 50+ simultaneous allocation requests
-- **Uptime**: 99.9% availability in production
+- **Uptime**: 99% availability in production
 
 ### Business Metrics
 - **Time Savings**: 100+ hours/month (previously manual Excel work)
@@ -286,6 +363,10 @@ open http://localhost:9090
 ---
 
 ## Testing Strategy
+
+Basic test suite with unit tests and health checks. Comprehensive integration testing planned for future releases.
+
+**→ See more in [Troubleshooting Guide](docs/TROUBLESHOOTING.md)**
 
 ### Current Test Suite
 ```bash
@@ -311,41 +392,11 @@ app/tests/
 
 ---
 
-## Production Deployment
-
-### AWS Infrastructure (Terraform)
-```hcl
-# ECS Fargate with auto-scaling
-resource "aws_ecs_service" "fastapi" {
-  name            = "dyno-agent-service"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.fastapi.arn
-  desired_count   = 2
-  launch_type     = "FARGATE"
-  
-  # Load balancer integration
-  load_balancer {
-    target_group_arn = aws_lb_target_group.fastapi.arn
-    container_name   = "fastapi"
-    container_port   = 8000
-  }
-}
-```
-
-### CI/CD Pipeline
-```yaml
-# GitHub Actions deployment
-- name: Deploy to ECS
-  run: |
-    aws ecs update-service \
-      --cluster dyno-agent-cluster \
-      --service dyno-agent-service \
-      --force-new-deployment
-```
-
----
-
 ## Monitoring & Observability
+
+Enterprise-grade monitoring stack with Prometheus, Grafana, CloudWatch integration, and comprehensive business intelligence dashboards.
+
+**→ See more in [Metrics System](docs/METRICS_SYSTEM.md) | [AI Observability](docs/AI_OBSERVABILITY.md)**
 
 ### Enterprise Monitoring Stack
 
@@ -375,7 +426,13 @@ graph LR
 - **Database Metrics**: Historical analysis and business intelligence
 - **Structured Logging**: Correlation ID tracking and debugging
 
-### Production Dashboards
+## Monitoring & Observability
+
+Enterprise-grade monitoring with dual-backend architecture: cost-effective Prometheus + Grafana for real-time dashboards, and AWS CloudWatch for enterprise integration.
+
+**→ See detailed guides: [Metrics System](docs/METRICS_SYSTEM.md) | [AI Observability](docs/AI_OBSERVABILITY.md)**
+
+### Quick Start
 ```bash
 # Start monitoring stack
 make run
@@ -383,162 +440,17 @@ make run
 # Access dashboards
 make grafana-url    # http://localhost:3000 (admin/admin)
 make prometheus-url # http://localhost:9090
-
-# Check metrics endpoint
-make metrics
 ```
 
-### Production Metrics System
-Comprehensive instrumentation with automatic performance tracking:
+### Key Features
+- **Dual Backend**: Prometheus + CloudWatch for flexibility and cost optimization
+- **Business Intelligence**: ROI tracking, time savings, and cost analysis
+- **AI Analytics**: LangSmith integration for conversation tracking and token usage
+- **Real-time Dashboards**: Performance metrics, success rates, and system health
+- **Production Ready**: Persistent storage, alerting, and enterprise observability
 
-```python
-# Automatic method instrumentation
-@track_performance(service_name="AllocationService", include_metadata=True)
-async def auto_allocate_vehicle_core(self, vehicle_id: int, start_date: date):
-    """Automatically tracked: duration, success rate, error details"""
-    return await self.allocate_logic()
-```
+---
 
-### Multi-Backend Monitoring Architecture
-```bash
-# Prometheus metrics for real-time monitoring
-curl http://localhost:8000/metrics/prometheus
-
-# Grafana dashboard with business intelligence
-open http://localhost:3000  # admin/admin
-
-# CloudWatch integration for enterprise monitoring
-# Namespace: DynoAgent/Production
-```
-
-### Enterprise Observability Stack
-- **Prometheus + Grafana**: Industry-standard monitoring with custom dashboards
-- **AWS CloudWatch**: Enterprise-grade metrics and alerting
-- **Structured Logging**: Correlation ID tracking across requests
-- **Business Intelligence**: ROI and cost savings metrics
-- **Real-time Dashboards**: Performance, success rates, and business impact
-
-### Production Metrics Available
-```promql
-# Business metrics
-dyno_allocation_requests_total     # Requests by status
-dyno_allocation_duration_seconds   # Latency histogram
-dyno_monthly_hours_saved          # Time savings vs manual
-dyno_cost_savings_usd             # Monthly cost savings
-dyno_active_users                 # Current active users
-
-# Key queries
-rate(dyno_allocation_requests_total{status="success"}[5m]) / rate(dyno_allocation_requests_total[5m]) * 100  # Success rate
-histogram_quantile(0.95, rate(dyno_allocation_duration_seconds_bucket[5m]))  # P95 latency
-```
-
-### Real-time Performance Dashboard
-```bash
-# Get system performance metrics
-curl -H "Authorization: Bearer TOKEN" \
-  http://localhost:8000/metrics/performance?hours=24
-
-# Response: Live production data
-{
-  "period_hours": 24,
-  "stats": [
-    {
-      "service": "AllocationService",
-      "method": "auto_allocate_vehicle_core",
-      "total_calls": 847,
-      "avg_duration_ms": 156.7,
-      "max_duration_ms": 2340.1,
-      "success_rate": 98.2
-    }
-  ]
-}
-```
-
-### Business Impact Tracking
-```bash
-# Get ROI and efficiency metrics
-curl -H "Authorization: Bearer TOKEN" \
-  http://localhost:8000/metrics/business
-
-# Response: Quantified business value
-{
-  "total_successful_allocations": 2847,
-  "avg_allocation_time_ms": 156.7,
-  "estimated_time_saved_hours": 189.8
-}
-```
-
-### LangSmith Integration
-- **Token Usage Tracking**: Cost monitoring per conversation
-- **Agent Performance**: Tool execution times and success rates
-- **Error Analysis**: Detailed failure investigation
-- **User Behavior**: Query patterns and system usage
-- **Conversation Analytics**: Duration, tools used, success rates
-- **Real-time Monitoring**: Live conversation tracking and debugging
-
-## **AI Conversation Analytics**
-
-## LangSmith Auto-Tracing
-
-**Important:** LangGraph automatically traces to LangSmith when configured - no manual decorators needed!
-
-```bash
-# Just set these environment variables:
-LANGCHAIN_API_KEY=your_key_here
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_PROJECT=dyno-agent-production
-```
-
-**What gets traced automatically:**
-- **Agent execution** - Every LangGraph run
-- **Tool calls** - All tool executions and results  
-- **LLM calls** - Token usage, latency, responses
-- **State transitions** - Graph node execution flow
-- **Errors** - Detailed error traces and debugging info
-
-**No code changes needed** - LangGraph handles everything!
-
-### Real-time Conversation Metrics
-```bash
-# Live conversation analytics
-curl -H "Authorization: Bearer TOKEN" \
-  http://localhost:8000/chat/metrics/conversation?hours=24
-
-# Production metrics response:
-{
-  "total_conversations": 847,
-  "avg_duration_ms": 2340,
-  "avg_tokens_per_conversation": 1250,
-  "most_used_tools": ["auto_allocate_vehicle", "find_available_dynos"],
-  "success_rate": 96.8,
-  "cost_per_conversation_usd": 0.045
-}
-```
-
-### Business Intelligence Dashboard
-- **Conversation Volume**: Real-time chat activity
-- **Tool Usage Patterns**: Most requested operations
-- **User Engagement**: Session duration and frequency
-- **Cost Analysis**: Token usage and operational costs
-- **Performance Trends**: Response time optimization
-- **Error Tracking**: Failed conversations and resolution
-
-### Metrics Database Schema
-```sql
--- Production metrics storage
-CREATE TABLE metrics (
-    id SERIAL PRIMARY KEY,
-    correlation_id VARCHAR INDEX,
-    service_name VARCHAR INDEX,
-    method_name VARCHAR INDEX,
-    user_id INTEGER INDEX,
-    duration_ms FLOAT,
-    success BOOLEAN,
-    error_message VARCHAR,
-    metadata JSON,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-```
 
 ---
 
@@ -629,3 +541,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 *This project represents a real-world application of AI in industrial operations, demonstrating how conversational AI can transform manual processes into intelligent, automated systems. Built with production-grade engineering practices and deployed at scale in Ford Motor Company's operations.*
+
+---
+
+## ⚖️ Legal & Ethical Disclaimer
+
+**Independent Portfolio Project**: This repository contains original code and implementations created independently for portfolio demonstration purposes. While inspired by automotive testing workflows, all technical solutions, algorithms, and implementations are original work.
+
+**No Proprietary Content**: This project does not contain, reference, or derive from any Ford Motor Company proprietary code, confidential data, trade secrets, or internal systems. All examples and use cases are generalized and publicly available concepts.
+
+**Educational Purpose**: This project serves as a technical demonstration of my AI engineering capabilities in industrial automation contexts, showcasing modern software architecture patterns and best practices.
