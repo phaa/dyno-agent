@@ -1,10 +1,12 @@
 from datetime import date
+from core.metrics import track_performance
 
 class BusinessRules: 
     MAX_ALLOCATION_DAYS = 30
     MIN_ALLOCATION_DAYS = 1
 
     @staticmethod
+    @track_performance(service_name="BusinessRules")
     def validate_allocation_duration(start_date: date, end_date: date):
         duration = (end_date - start_date).days + 1
         if duration < BusinessRules.MIN_ALLOCATION_DAYS:

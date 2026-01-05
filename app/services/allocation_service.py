@@ -10,6 +10,9 @@ from models.dyno import Dyno
 from models.allocation import Allocation
 from models.vehicle import Vehicle
 
+# Metrics
+from core.metrics import track_performance
+
 
 class AllocationService:
     """
@@ -25,6 +28,7 @@ class AllocationService:
     # ---------------------------------------
     # Core Logic: Find Available Dynos
     # ---------------------------------------
+    @track_performance(service_name="AllocationService", include_metadata=True)
     async def find_available_dynos_core(self, start_date: date, end_date: date, weight_lbs: int, drive_type: str, test_type: str):
         """
         SQL logic implementation to find available Dynos based on
@@ -63,6 +67,7 @@ class AllocationService:
     # ---------------------------------------
     # Core Logic: Auto Allocate Vehicle
     # ---------------------------------------
+    @track_performance(service_name="AllocationService", include_metadata=True)
     async def auto_allocate_vehicle_core(self, vehicle_id: int = None, vin: str = None, start_date: date = None, days_to_complete: int = None, backup: bool = False, max_backup_days: int = 7):
         """
         Attempts to allocate a dyno, including vehicle resolution, duration calculation,
@@ -205,6 +210,7 @@ class AllocationService:
     # ---------------------------------------
     # Core Logic: Detect conflicts
     # ---------------------------------------
+    @track_performance(service_name="AllocationService")
     async def detect_conflicts_core(self):
         stmt = (
             select(Allocation, Dyno)
