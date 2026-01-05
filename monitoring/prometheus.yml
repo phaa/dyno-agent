@@ -1,19 +1,19 @@
 global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+  scrape_interval: 15s  # Coleta métricas a cada 15 segundos
+  evaluation_interval: 15s  # Avalia regras a cada 15 segundos
 
 rule_files:
-  # - "first_rules.yml"
+  # - "first_rules.yml"  # Arquivos de regras (alertas)
   # - "second_rules.yml"
 
-scrape_configs:
-  - job_name: 'dyno-agent'
+scrape_configs:  # Configurações de coleta
+  - job_name: 'dyno-agent'  # Nome do job
     static_configs:
-      - targets: ['host.docker.internal:8000']
-    metrics_path: '/metrics/prometheus'
-    scrape_interval: 15s
-    scrape_timeout: 10s
+      - targets: ['host.docker.internal:8000']  # Endereço da API (Docker -> host)
+    metrics_path: '/metrics/prometheus'  # Endpoint de métricas
+    scrape_interval: 15s  # Coleta a cada 15s
+    scrape_timeout: 10s  # Timeout de 10s
     
-  - job_name: 'prometheus'
+  - job_name: 'prometheus'  # Auto-monitoramento do Prometheus
     static_configs:
-      - targets: ['localhost:9090']
+      - targets: ['localhost:9090']  # Prometheus monitora a si mesmo

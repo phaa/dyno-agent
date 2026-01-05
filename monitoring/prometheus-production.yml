@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # - "alert_rules.yml"
+
+scrape_configs:
+  # Scrape the FastAPI application
+  - job_name: 'dyno-agent-production'
+    static_configs:
+      - targets: ['dyno-agent-service:8000']  # ECS service discovery
+    metrics_path: '/metrics/prometheus'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    
+  # Self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+      
+  # Grafana monitoring
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana-service:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
