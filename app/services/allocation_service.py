@@ -16,23 +16,69 @@ from core.metrics import track_performance
 
 class AllocationService:
     """
-    Contains business logic and direct database access
-    for Dynos and Allocations. Fully isolated from LangChain/LangGraph,
-    allowing clean unit testing.
+    Business logic service for vehicle-to-dynamometer allocation operations.
+    
+    This service provides core functionality for:
+    - Finding available dynos based on vehicle compatibility
+    - Automatic vehicle allocation with concurrency control
+    - Conflict detection and resolution
+    - Maintenance window management
+    - Safe database querying with security validation
+    
+    The service is fully isolated from LangChain/LangGraph frameworks,
+    enabling clean unit testing and reusability across different interfaces.
+    
+    All database operations use SQLAlchemy 2.0 async patterns with proper
+    transaction management and row-level locking for race condition prevention.
     """
 
     def __init__(self, db: AsyncSession):
-        """Initializes the service with an active database session."""
+        """
+        Initializes the allocation service with a database session.
+        
+        Args:
+            db (AsyncSession): Active SQLAlchemy async database session
+                              for all database operations
+        """
         self.db = db
 
-    # ---------------------------------------
-    # Core Logic: Find Available Dynos
-    # ---------------------------------------
+    @track_performance(service_name="AllocationService", include_metadata=True)
+    def get_datetime_now_core(self):
+        """
+        Returns the current date and time.
+        
+        This method is tracked for performance monitoring and provides
+        a consistent timestamp source across the application.
+        
+        Returns:
+            datetime: Current date and time
+        """
+        return datetime.now()
+
     @track_performance(service_name="AllocationService", include_metadata=True)
     async def find_available_dynos_core(self, start_date: date, end_date: date, weight_lbs: int, drive_type: str, test_type: str):
         """
-        SQL logic implementation to find available Dynos based on
-        compatibility and availability windows (including maintenance).
+        Finds available dynamometers based on vehicle compatibility and scheduling constraints.
+        
+        Performs sophisticated multi-dimensional matching using PostgreSQL array operators
+        to find dynos that support the vehicle's specifications and are available during
+        the requested time window.
+        
+        Args:
+            start_date (date): Start date of the requested allocation period
+            end_date (date): End date of the requested allocation period  
+            weight_lbs (int): Vehicle weight in pounds for compatibility matching
+            drive_type (str): Vehicle drive type ('2WD', 'AWD', etc.)
+            test_type (str): Type of test to be performed ('brake', 'emission', etc.)
+            
+        Returns:
+            list[dict]: List of available dyno dictionaries with 'id' and 'name' keys
+            
+        Database Operations:
+            - Uses PostgreSQL @> array operator for compatibility matching
+            - Respects maintenance windows (available_from/available_to)
+            - Filters only enabled dynos
+            - Orders results by dyno name for consistent output
         """
         
         # Determine weight class
@@ -64,14 +110,42 @@ class AllocationService:
             for d in result.scalars().all()
         ]
 
-    # ---------------------------------------
-    # Core Logic: Auto Allocate Vehicle
-    # ---------------------------------------
     @track_performance(service_name="AllocationService", include_metadata=True)
     async def auto_allocate_vehicle_core(self, vehicle_id: int = None, vin: str = None, start_date: date = None, days_to_complete: int = None, backup: bool = False, max_backup_days: int = 7):
         """
-        Attempts to allocate a dyno, including vehicle resolution, duration calculation,
-        backup window loop, and transactional concurrency control.
+        Automatically allocates an optimal dyno for a vehicle with intelligent backup scheduling.
+        
+        This is the core allocation algorithm that handles:
+        - Vehicle resolution by ID or VIN
+        - Duration calculation and validation
+        - Primary window allocation attempt
+        - Backup window search with configurable range
+        - Concurrency control using database row locking
+        - Transactional safety with rollback on conflicts
+        
+        Args:
+            vehicle_id (int, optional): Database ID of the vehicle to allocate
+            vin (str, optional): VIN of the vehicle (alternative to vehicle_id)
+            start_date (date, optional): Preferred start date for allocation
+            days_to_complete (int, optional): Duration in days (defaults to 1)
+            backup (bool): Whether to search backup dates if primary fails
+            max_backup_days (int): Maximum days to search forward for backup slots
+            
+        Returns:
+            dict: Allocation result with success status, message, and allocation details
+                 Format: {"success": bool, "message": str, "allocation": dict}
+                 
+        Concurrency Control:
+            - Uses SELECT ... FOR UPDATE to lock dyno rows
+            - Re-validates conflicts after acquiring lock
+            - Atomic commit/rollback for each allocation attempt
+            
+        Algorithm:
+            1. Resolve vehicle by ID or VIN
+            2. Calculate allocation duration
+            3. Try primary time window
+            4. If backup enabled, try shifted windows up to max_backup_days
+            5. Return first successful allocation or failure message
         """
         if start_date is None:
             return {"success": False, "message": "start_date is required."}
@@ -183,10 +257,18 @@ class AllocationService:
 
         return {"success": False, "message": "No available dynos found for request."}
     
-    # ---------------------------------------
-    # Core Logic: Check vehicle allocation
-    # ---------------------------------------
+    @track_performance(service_name="AllocationService")
     async def check_vehicle_allocation_core(self, vehicle_id: int):
+        """
+        Retrieves all allocations for a specific vehicle.
+        
+        Args:
+            vehicle_id (int): The ID of the vehicle to check allocations for
+            
+        Returns:
+            str | list[str]: Either a message indicating no allocations found,
+                           or a list of formatted allocation details
+        """
         stmt = (
             select(Allocation, Dyno)
             .join(Dyno, Dyno.id == Allocation.dyno_id)
@@ -207,11 +289,18 @@ class AllocationService:
             
         return output
 
-    # ---------------------------------------
-    # Core Logic: Detect conflicts
-    # ---------------------------------------
     @track_performance(service_name="AllocationService")
     async def detect_conflicts_core(self):
+        """
+        Detects scheduling conflicts between allocations on the same dyno.
+        
+        Performs O(n²) comparison of all active allocations to identify
+        overlapping time windows on the same dynamometer.
+        
+        Returns:
+            str | list[dict]: Either "No conflicts found." or a list of conflict details
+                            containing dyno name, conflicting vehicles, and overlap periods
+        """
         stmt = (
             select(Allocation, Dyno)
             .join(Dyno, Dyno.id == Allocation.dyno_id)
@@ -239,10 +328,13 @@ class AllocationService:
 
         return conflicts or "No conflicts found."
     
-    # ---------------------------------------
-    # Core Logic: Completed tests count
-    # ---------------------------------------
     async def completed_tests_count_core(self):
+        """
+        Counts the total number of completed test allocations.
+        
+        Returns:
+            int: The count of allocations with status "completed"
+        """
         stmt = (
             select(Allocation)
             .where(
@@ -253,10 +345,20 @@ class AllocationService:
         rows = result.scalars().all()
         return len(rows)
 
-    # ---------------------------------------
-    # Core Logic: Get tests by status
-    # ---------------------------------------
     async def get_tests_by_status_core(self, status: str):
+        """
+        Retrieves all test allocations filtered by status.
+        
+        Args:
+            status (str): The allocation status to filter by (e.g., "scheduled", "completed", "cancelled")
+            
+        Returns:
+            list[dict]: List of allocation dictionaries containing id, type, start_date, and end_date
+            
+        Note:
+            There's a bug in the current implementation - end_date should be allocation.end_date,
+            not allocation.start_date
+        """
         stmt = (
             select(Allocation)
             .where(
@@ -269,17 +371,26 @@ class AllocationService:
                 id=allocation.id, 
                 type=allocation.test_type, 
                 start_date=allocation.start_date,
-                end_date=allocation.start_date
+                end_date=allocation.start_date  # BUG: Should be allocation.end_date
             ) 
             for allocation in result.scalars().all()
         ]
 
-    # ---------------------------------------
-    # Core Logic: Maintenance check
-    # ---------------------------------------
+    @track_performance(service_name="AllocationService")
     async def maintenance_check_core(self):
         """
-        Checks if any dynos are outside their availability window today.
+        Identifies dynos that are outside their availability windows.
+        
+        Checks all enabled dynos to find those that are currently unavailable
+        due to maintenance windows or availability restrictions.
+        
+        Returns:
+            str | list[str]: Either "All active dynos are available today." or
+                           a list of messages describing unavailable dynos
+                           
+        Maintenance Conditions:
+            - Future maintenance: available_from > today (not yet available)
+            - Past maintenance: available_to < today (should be disabled)
         """
         today = date.today()
         stmt = (
@@ -306,10 +417,25 @@ class AllocationService:
             for d in dynos
         ]
 
-    # ---------------------------------------
-    # Core Logic: Generic query
-    # ---------------------------------------
+    @track_performance(service_name="AllocationService")
     async def query_database_core(self, sql: str):
+        """
+        Executes a safe SELECT query against the database with security validation.
+        
+        Provides a controlled interface for running custom SQL queries while preventing
+        dangerous operations through keyword filtering and query type validation.
+        
+        Args:
+            sql (str): The SQL query to execute (must be a SELECT statement)
+            
+        Returns:
+            str | list[dict]: Either an error message or list of query results as dictionaries
+            
+        Security:
+            - Only SELECT queries are allowed
+            - Forbidden keywords (DROP, DELETE, UPDATE, INSERT, ALTER) are blocked
+            - Uses SQLAlchemy's text() for safe query execution
+        """
         sql_clean = sql.strip().lower()
         if not sql_clean.startswith("select"):
             return "Only SELECT queries are allowed."

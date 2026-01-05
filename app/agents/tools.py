@@ -1,10 +1,7 @@
-import re
-from datetime import datetime, date
+from datetime import date
 from langchain_core.tools import tool
 from langgraph.runtime import get_runtime
-from langgraph.config import get_stream_writer
 from services.allocation_service import AllocationService
-from .state import GraphState 
 
 
 # ---------------------------------------
@@ -14,6 +11,11 @@ def _get_service_from_runtime():
     """
     Retrieves the DB session from the LangGraph runtime and initializes the AllocationService.
     This ensures the service has access to the 'db' object (AsyncSession).
+
+    Clean separation between agent tools and business logic:
+    - Tools remain stateless and focused
+    - Business logic encapsulated in services
+    - Database operations properly managed
     """
     # We assume the GraphState or runtime context contains the 'db' object
     runtime = get_runtime()
@@ -32,8 +34,8 @@ def get_datetime_now():
     Returns:
         The current date and time in YYYY-MM-DD HH:MM:SS format.
     """
-    current_datetime = datetime.now()
-    return current_datetime
+    service = _get_service_from_runtime()
+    return service.get_datetime_now_core()
 
 
 # ---------------------------------------
@@ -175,7 +177,11 @@ async def auto_allocate_vehicle(
     max_backup_days: int = 7
 ):
     """
-    Attempts to automatically allocate a dyno for a vehicle.
+    Automatically allocates optimal dyno with:
+    - Multi-dimensional compatibility matching
+    - Concurrency control (FOR UPDATE locks)
+    - Intelligent backup date selection
+    - Real-time conflict detection
 
     Args:
         vehicle_id: Existing vehicle ID (preferred)

@@ -17,7 +17,7 @@ class Metrics(Base):
     error_message = Column(String, nullable=True)
     
     # Business metrics
-    metadata = Column(JSON, nullable=True)
+    extra_data = Column(JSON, nullable=True)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, index=True)

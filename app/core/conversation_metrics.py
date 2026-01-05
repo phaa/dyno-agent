@@ -1,10 +1,9 @@
 import os
-import time
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.prometheus_metrics import prometheus_collector
+from core.prometheus_metrics import metrics_storer
 from models.metrics import Metrics
 
 try:
@@ -44,8 +43,8 @@ class ConversationMetrics:
         }
         
         # Update Prometheus metrics
-        if prometheus_collector:
-            prometheus_collector.record_allocation_request(
+        if metrics_storer:
+            metrics_storer.record_method_execution(  
                 service_name="ChatService",
                 method_name="chat_conversation",
                 duration_seconds=duration_ms / 1000,
@@ -56,7 +55,7 @@ class ConversationMetrics:
         return {
             "conversation_tracked": True,
             "langsmith_enabled": self.langsmith_enabled,
-            "metadata": metadata
+            "extra_data": metadata
         }
     
     async def get_conversation_stats(self, hours: int = 24) -> Dict[str, Any]:

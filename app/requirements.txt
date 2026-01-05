@@ -31,3 +31,6 @@ boto3
 
 # LangSmith (AI Observability)
 langsmith
+
+
+prometheus_client

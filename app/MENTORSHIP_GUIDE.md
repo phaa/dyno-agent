@@ -36,7 +36,7 @@ Demonstrar **enterprise architecture**, **AI observability** e **business intell
 # app/tests/test_metrics.py
 import pytest
 from app.core.metrics import MetricsCollector
-from app.core.prometheus_metrics import prometheus_collector
+from app.core.prometheus_metrics import metrics_storer
 
 class TestMetricsSystem:
     @pytest.mark.asyncio
