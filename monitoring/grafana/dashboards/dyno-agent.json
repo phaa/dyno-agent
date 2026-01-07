@@ -1,0 +1,129 @@
+{
+  "id": null,
+  "title": "Dyno-Agent Production Metrics",
+  "tags": ["dyno-agent", "production"],
+  "timezone": "browser",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Active Users",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "dyno_active_users",
+          "legendFormat": "Active Users"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+    },
+    {
+      "id": 2,
+      "title": "Monthly Hours Saved",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "dyno_monthly_hours_saved",
+          "legendFormat": "Hours Saved"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "short",
+          "decimals": 1
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+    },
+    {
+      "id": 3,
+      "title": "Monthly Cost Savings",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "dyno_cost_savings_usd",
+          "legendFormat": "Cost Savings USD"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "currencyUSD"
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0}
+    },
+    {
+      "id": 4,
+      "title": "System Info",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "dyno_agent_info_info",
+          "legendFormat": "{{version}} - {{environment}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "short"
+        }
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0}
+    },
+    {
+      "id": 5,
+      "title": "Active Users Over Time",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "dyno_active_users",
+          "legendFormat": "Active Users"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        }
+      },
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 8}
+    },
+    {
+      "id": 6,
+      "title": "Cost Savings Trend",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "dyno_cost_savings_usd",
+          "legendFormat": "Cost Savings USD"
+        },
+        {
+          "expr": "dyno_monthly_hours_saved * 50",
+          "legendFormat": "Hours Saved (x$50)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "min": 0
+        }
+      },
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 8}
+    }
+  ],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "version": 1,
+  "uid": "dyno-agent-metrics",
+  "schemaVersion": 30
+}
