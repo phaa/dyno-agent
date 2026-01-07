@@ -2,6 +2,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Any
+from pydantic import BaseModel
 
 from core.db import get_db
 from core.metrics_collector import MetricsCollector  
@@ -9,6 +10,11 @@ from core.prometheus_metrics import metrics_storer
 from auth.auth_bearer import JWTBearer
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
+
+class BusinessMetricsUpdate(BaseModel):
+    hours_saved: float
+    cost_savings: float
+    active_users: int
 
 @router.get("/performance", dependencies=[Depends(JWTBearer())]) 
 async def get_performance_metrics(
@@ -33,6 +39,20 @@ async def get_business_metrics(
         return await collector.get_business_metrics()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch business metrics: {str(e)}")
+
+
+@router.post("/update-business")
+async def update_business_metrics(metrics: BusinessMetricsUpdate):
+    """Update business metrics for dashboard testing"""
+    try:
+        metrics_storer.update_business_metrics(
+            hours_saved=metrics.hours_saved,
+            cost_savings=metrics.cost_savings
+        )
+        metrics_storer.update_active_users(metrics.active_users)
+        return {"status": "updated", "metrics": metrics.dict()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update metrics: {str(e)}")
 
 
 @router.get("/health") 

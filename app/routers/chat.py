@@ -6,9 +6,11 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.graph import build_graph
+from models.user import User
 from services.conversation_service import ConversationService
 from auth.auth_bearer import JWTBearer
 from auth.auth_handler import get_user_email_from_token
@@ -29,35 +31,45 @@ def get_checkpointer(request: Request):
     return request.app.state.checkpointer
 
 
-@router.post("/chat/stream", dependencies=[Depends(JWTBearer())], tags=["chat"])
+@router.post("/stream", dependencies=[Depends(JWTBearer())], tags=["chat"])
 @track_performance(service_name="ChatService", include_metadata=True)
 async def chat_stream(
-    request: ChatRequest, 
+    chat_request: ChatRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     checkpointer = Depends(get_checkpointer)
 ) -> StreamingResponse:
     """
-    Endpoint for chat with SSE (Server-Sent Events) streaming.
-    Receives a message from the user and sends the model's responses in real time, chunk by chunk.
+    SSE chat endpoint using LangGraph.
+    - Streaming is event-based (not token-based)
+    - Deduplicated AI messages
+    - writer() used only for status updates
+    - PostgreSQL persistence is UI-only
     """
 
     user_email = get_user_email_from_token(request)
-    user_message: str = request.message
-    conv_id: str | None = request.conversation_id
+
+    existing_user = (
+        await db.execute(select(User).where(User.email == user_email))
+    ).scalar_one_or_none()
+
+    if not existing_user:
+        raise HTTPException(status_code=400, detail="User don't exist.")
+    
+    user_message: str = chat_request.message
+    conv_id: str | None = chat_request.conversation_id
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        """
-        Generator function to yield chat response chunks as SSE.
-        """
         start_time = time.time()
-        assistant_response = ""
-        tools_used = []
+
+        last_ai_message_id: str | None = None
+
+        # Final assistant message (UI only)
+        final_assistant_response: str | None = None
         
         graph = await build_graph(checkpointer)
-
         conv_service = ConversationService(db=db)
         
-        # Get or create conversation
         conversation = await conv_service.get_or_create_conversation(
             user_email=user_email,
             conversation_id=conv_id
@@ -72,70 +84,117 @@ async def chat_stream(
 
         inputs = {
             "messages": [HumanMessage(content=user_message)],
-            "user_name": user_email.split("@")[0], 
+            "user_name": existing_user.fullname.split(" ")[0],
         }
 
-        # Thread ID to maintain context
-        config = {"configurable": {"thread_id": user_email}}
+        config = {
+            "configurable": {
+                "thread_id": f"{user_email}_{conversation.id}"
+            }
+        }
+
         context = UserContext(db=db)
 
         stream_args = {
             "input": inputs,
             "config": config,
             "context": context,
-            "stream_mode": ["updates", "custom"],  # Can be "values", "updates", "custom"
+            "stream_mode": ["updates", "custom"], 
         }
 
         async for stream_mode, chunk in graph.astream(**stream_args):
-            if stream_mode == "updates":
-                for step, data in chunk.items():
-                    #logger.warning(step)
-                    #logger.warning(data)
-
-                    if not data or "messages" not in data:
-                        continue
-
-                    for msg in data["messages"]:
-                        if isinstance(msg, AIMessage) and msg.content:
-                            assistant_response += msg.content  # Track full response
-                            payload = json.dumps({
-                                "type": "assistant" ,
-                                "content": msg.content
-                            })
-                            await conv_service.save_message(
-                                conversation_id=conversation.id,
-                                role="assistant",
-                                content=msg.content
-                            )
-                            yield f"data: {payload}\n\n"
-
-            elif stream_mode == "custom":   
+            # STATUS STREAM (writer)
+            if stream_mode == "custom":   
                 payload = json.dumps({
-                    "type": "token",
+                    "type": "status",
                     "content": chunk
                 })
-                yield f"data: {payload}\n\n" 
 
-        # Track conversation metrics with LangSmith
+                await conv_service.save_message(
+                    conversation_id=conversation.id,
+                    role="status",
+                    content=chunk,
+                )
+                
+                yield f"data: {payload}\n\n" 
+                continue
+            
+            # ASSISTANT STREAM 
+            if stream_mode != "updates":
+                continue
+                
+            for _, data in chunk.items():
+                if not data or "messages" not in data:
+                    continue
+
+                ai_messages = [
+                    msg for msg in data["messages"] 
+                    if isinstance(msg, AIMessage) and msg.content
+                ]
+
+                if not ai_messages:
+                    continue
+
+                msg = ai_messages[-1]  # only the newest
+
+                if msg.id == last_ai_message_id:
+                    continue  # deduplicate
+
+                last_ai_message_id = msg.id
+
+                if isinstance(msg.content, list):
+                    contents = [
+                        item["text"]
+                        for item in msg.content
+                        if item.get("type") == "text"
+                    ]
+                    response_text = "\n".join(contents)
+                else:
+                    response_text = msg.content
+
+                final_assistant_response = response_text
+                
+                payload = json.dumps({
+                    "type": "assistant",
+                    "content": response_text
+                })
+
+                await conv_service.save_message(
+                    conversation_id=conversation.id,
+                    role="assistant",
+                    content=response_text,
+                )
+                
+                yield f"data: {payload}\n\n"
+            
+
+        
+
+        
+        # Track conversation metrics
         duration_ms = (time.time() - start_time) * 1000
+
         metrics_tracker = ConversationMetrics(db)
         await metrics_tracker.track_conversation(
             user_message=user_message,
-            assistant_response=assistant_response,
+            assistant_response=final_assistant_response,
             user_email=user_email,
             conversation_id=conversation.id,
             duration_ms=duration_ms,
-            tools_used=tools_used
+            tools_used=[]
         )
         
-        # Finaliza o stream
+        # End the stream
         yield "data: [DONE]\n\n"
 
     # Retorna a resposta como SSE
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(), 
+        media_type="text/event-stream"
+    )
 
 
-@router.get("/metrics/conversation", dependencies=[Depends(JWTBearer())])
+@router.get("/metrics", dependencies=[Depends(JWTBearer())])
 async def get_conversation_metrics(hours: int = 24, db: AsyncSession = Depends(get_db)):
     """Get real conversation metrics from database and LangSmith"""
     metrics_tracker = ConversationMetrics(db)
