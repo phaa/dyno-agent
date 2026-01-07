@@ -1,6 +1,7 @@
 from datetime import date
 from langchain_core.tools import tool
 from langgraph.runtime import get_runtime
+from langgraph.config import get_stream_writer
 from services.allocation_service import AllocationService
 
 
@@ -59,6 +60,9 @@ async def find_available_dynos(start_date: date, end_date: date, weight_lbs: int
         A list of available dynos.
     """
     
+    writer = get_stream_writer()
+    writer("🔍 Searching database for available dynamometers...")
+    
     service = _get_service_from_runtime()
     return await service.find_available_dynos_core(
         start_date=start_date,
@@ -81,6 +85,9 @@ async def check_vehicle_allocation(vehicle_id: int):
         A list of strings describing allocations, or a message indicating none are scheduled.
     """
 
+    writer = get_stream_writer()
+    writer(f"🚗 Checking vehicle {vehicle_id} allocations...")
+
     service = _get_service_from_runtime()
     return await service.check_vehicle_allocation_core(vehicle_id=vehicle_id)
 
@@ -94,6 +101,9 @@ async def detect_conflicts():
         A list of conflict dictionaries, or a message if no conflicts are found.
     """
 
+    writer = get_stream_writer()
+    writer("⚠️ Analyzing allocation conflicts...")
+
     service = _get_service_from_runtime()
     return await service.detect_conflicts_core()
 
@@ -106,6 +116,9 @@ async def completed_tests_count():
     Returns:
         Integer: number of completed tests.
     """
+
+    writer = get_stream_writer()
+    writer("📊 Counting completed tests...")
 
     service = _get_service_from_runtime()
     return await service.completed_tests_count_core()
@@ -123,6 +136,9 @@ async def get_tests_by_status(status: str):
         A list of allocations.
     """
 
+    writer = get_stream_writer()
+    writer(f"📄 Searching tests with status '{status}'...")
+
     service = _get_service_from_runtime()
     return await service.get_tests_by_status_core(status=status)
 
@@ -137,6 +153,9 @@ async def maintenance_check():
         A list of strings describing dynos unavailable today,
         or a message if all are available.
     """
+
+    writer = get_stream_writer()
+    writer("🔧 Checking dynamometer maintenance status...")
 
     service = _get_service_from_runtime()
     return await service.maintenance_check_core()
@@ -159,9 +178,8 @@ async def query_database(sql: str):
         - An error message in case of failure.
     """
 
-    # Optional: Use get_stream_writer() if you want the query logged in the agent stream.
-    # writer = get_stream_writer()
-    # writer(f"Querying database: {sql}")
+    writer = get_stream_writer()
+    writer("📊 Executing custom database query...")
 
     service = _get_service_from_runtime()
     return await service.query_database_core(sql=sql)
@@ -194,6 +212,9 @@ async def auto_allocate_vehicle(
     Returns:
         dict: { "success": bool, "message": str, "allocation": {...} }
     """
+
+    writer = get_stream_writer()
+    writer("⚙️ Attempting intelligent vehicle auto-allocation...")
 
     service = _get_service_from_runtime()
     return await service.auto_allocate_vehicle_core(

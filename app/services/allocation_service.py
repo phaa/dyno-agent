@@ -178,66 +178,80 @@ class AllocationService:
             test_type = "brake"  # Fallback, since Vehicle model does not define a test type
             
             candidates = await self.find_available_dynos_core(
-                s_date, e_date, vehicle.weight_lbs, vehicle.drive_type, test_type
+                s_date, 
+                e_date, 
+                vehicle.weight_lbs, 
+                vehicle.drive_type, 
+                test_type
             )
             if not candidates:
                 return None
 
-            # Try to reserve the first available dyno using FOR UPDATE and re-check conflicts
+            # Try candidates one by one with proper transactional locking
             for c in candidates:
                 dyno_id = c["id"]
                 
-                # Lock dyno row (FOR UPDATE) to avoid race conditions
-                lock_q = select(Dyno).where(Dyno.id == dyno_id).with_for_update()
-                lock_res = await self.db.execute(lock_q)
-                dyno = lock_res.scalar_one_or_none()
-                if not dyno or not dyno.enabled:
-                    continue
-
-                # Re-check overlapping allocations for the locked dyno
-                conflict_q = (
-                    select(Allocation)
-                    .where(
-                        Allocation.dyno_id == dyno_id,
-                        Allocation.status != "cancelled",
-                        not_(
-                            or_(
-                                Allocation.end_date < s_date,
-                                Allocation.start_date > e_date,
-                            )
-                        ),
-                    )
-                    .limit(1)
-                )
-                conflict = (await self.db.execute(conflict_q)).scalar_one_or_none()
-                if conflict:
-                    continue
-
-                # Create allocation
-                alloc = Allocation(
-                    vehicle_id=vehicle.id,
-                    dyno_id=dyno_id,
-                    test_type=test_type,
-                    start_date=s_date,
-                    end_date=e_date,
-                    status="scheduled",
-                )
-                self.db.add(alloc)
                 try:
-                    await self.db.commit()
-                    await self.db.refresh(alloc)
-                except Exception:
-                    await self.db.rollback()
-                    continue
+                    async with self.db.begin():
+                        # Lock dyno row (pessimist locking)
+                        dyno = (
+                            await self.db.execute(
+                                select(Dyno)
+                                .where(Dyno.id == dyno_id)
+                                .with_for_update() # prevent race conditions
+                            )
+                        ).scalar_one_or_none()
+                        
+                        if not dyno or not dyno.enabled:
+                            return None
+                        
+                        # Check for overlapping allocations
+                        conflict = (
+                            await self.db.execute(
+                                select(Allocation)
+                                .where(
+                                    Allocation.dyno_id == dyno_id,
+                                    Allocation.status != "cancelled",
+                                    Allocation.end_date >= s_date,
+                                    Allocation.start_date <= e_date
+                                )
+                                .limit(1)
+                            )
+                        ).scalar_one_or_none()
 
-                return {
-                    "allocation_id": alloc.id,
-                    "dyno_id": dyno.id,
-                    "dyno_name": dyno.name,
-                    "start_date": str(alloc.start_date),
-                    "end_date": str(alloc.end_date),
-                    "status": alloc.status,
-                }
+                        if conflict:
+                            raise RuntimeError("Dyno already allocated in this window.")
+                        
+                        # Create allocation atomically
+                        alloc = Allocation(
+                            vehicle_id=vehicle.id,
+                            dyno_id=dyno_id,
+                            test_type=test_type,
+                            start_date=s_date,
+                            end_date=e_date,
+                            status="scheduled",
+                        )
+
+                        self.db.add(alloc)
+
+                        # flush will ensure INSERT + PK availability inside tx
+                        await self.db.flush()
+
+                        result = {
+                            "allocation_id": alloc.id,
+                            "dyno_id": dyno.id,
+                            "dyno_name": dyno.name,
+                            "start_date": str(alloc.start_date),
+                            "end_date": str(alloc.end_date),
+                            "status": alloc.status,
+                        }
+
+                    # commit happened automatically here
+                    return result
+
+                except Exception:
+                    # rollback happens automatically on exception as well
+                    continue
 
             return None
 

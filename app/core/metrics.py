@@ -100,7 +100,7 @@ def track_performance(
                         success=success,
                         user_id=user_id,
                         error_message=error_message,
-                        metadata=extra_data if extra_data else None
+                        extra_data=extra_data if extra_data else None
                     )
                 )
         
@@ -130,7 +130,7 @@ async def _record_metric_async(
                 success=success,
                 user_id=user_id,
                 error_message=error_message,
-                metadata=extra_data
+                extra_data=extra_data
             )
             break # Exit after first successful db session
     except Exception as e:

@@ -1,14 +1,14 @@
 import os
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.prometheus_metrics import metrics_storer
 from models.metrics import Metrics
 
 try:
     from langsmith import Client
-    langsmith_client = Client() if os.getenv("LANGCHAIN_API_KEY") else None
+    langsmith_client = Client() if os.getenv("LANGSMITH_API_KEY") else None
 except ImportError:
     langsmith_client = None
 
@@ -16,7 +16,7 @@ class ConversationMetrics:
     """Tracks conversation metrics with automatic LangSmith integration"""
     
     def __init__(self, db: Optional[AsyncSession] = None):
-        self.langsmith_enabled = bool(os.getenv("LANGCHAIN_API_KEY"))
+        self.langsmith_enabled = bool(os.getenv("LANGSMITH_API_KEY"))
         self.client = langsmith_client
         self.db = db
     
@@ -90,7 +90,7 @@ class ConversationMetrics:
         stmt = select(
             func.count().label('total_conversations'),
             func.avg(Metrics.duration_ms).label('avg_duration_ms'),
-            func.sum(Metrics.success.cast('integer')).label('success_count'),
+            func.sum(Metrics.success.cast(Integer)).label('success_count'),
             func.count().label('total_count')
         ).where(
             and_(
@@ -191,8 +191,8 @@ class ConversationMetrics:
                 "langsmith_success_rate": round(success_rate, 2),
                 "most_used_tools": most_used_tools,
                 "cost_breakdown": {
-                    "input_cost": round(total_cost * 0.7, 4),  # Estimate
-                    "output_cost": round(total_cost * 0.3, 4)  # Estimate
+                    "input_cost": round(float(total_cost) * 0.7, 4),  # Estimate
+                    "output_cost": round(float(total_cost) * 0.3, 4)  # Estimate
                 }
             }
             

@@ -7,8 +7,6 @@ bcrypt
 pydantic[email]
 httpx
 python-dotenv
-langgraph
-langchain
 sqlalchemy
 psycopg2-binary
 psycopg[binary,pool]
@@ -20,6 +18,9 @@ pytest-asyncio
 
 # Google AI Studio
 langchain-google-genai
+langgraph
+langchain
+
 
 # Etl com excel
 pandas

@@ -52,9 +52,12 @@ cost_savings_usd = Gauge(
 
 # CloudWatch Client - for enterprise metrics
 try:
-    cloudwatch = boto3.client('cloudwatch', region_name='us-east-1')
+    #cloudwatch = boto3.client('cloudwatch', region_name='us-east-1')
+    pass
 except Exception as e:
     logger.warning(f"CloudWatch client initialization failed: {e}")
+    cloudwatch = None
+finally:
     cloudwatch = None
 
 metrics_storer = MetricsStorer(

@@ -1,12 +1,17 @@
 import os
 import logging
-from langchain_core.messages import AIMessage, SystemMessage
+import json
+from langchain_core.messages import AIMessage, SystemMessage, BaseMessage
 from langgraph.graph import END
 from sqlalchemy import text
 from core.config import GEMINI_MODEL_ID
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import get_runtime
+from langgraph.config import get_stream_writer
+
+from .state import AgentSummary, GraphState 
 from .tools import (
     find_available_dynos,
     check_vehicle_allocation,
@@ -17,12 +22,6 @@ from .tools import (
     get_datetime_now,
     auto_allocate_vehicle
 )
-
-from . import tools as tools_module
-
-tools_list = dir(tools_module)  #tools_module.__dict__.values()
-
-from .state import GraphState
 
 logger = logging.getLogger(__name__)
 
@@ -62,14 +61,75 @@ Use **markdown formatting** for all outputs.
 Address the user as {user_name}.
 """
 
+
+# -------------------------------
+# Summarization configuration
+# -------------------------------
+
+SUMMARY_PROMPT = """
+You are updating a structured conversation summary for a production system.
+
+Rules (STRICT):
+- Only use information explicitly stated in the messages.
+- NEVER remove existing decisions or constraints.
+- NEVER rephrase constraints or decisions.
+- NEVER infer intent or add new information.
+- If information is unclear, keep the previous value.
+- Keep lists concise and factual.
+- Context must be a short neutral narrative (max 5 lines).
+
+Previous summary (JSON):
+{previous_summary}
+
+New messages:
+{messages}
+
+Return ONLY valid JSON following this schema:
+{{
+  "decisions": string[],
+  "constraints": string[],
+  "open_tasks": string[],
+  "context": string
+}}
+"""
+
+CONVERSATION_SUMMARY_PROMPT = """
+Conversation summary:
+Decisions:
+{decisions}
+
+Constraints:
+{constraints}
+
+Open tasks:
+{open_tasks}
+
+Context:
+{context}
+"""
+
+INITIAL_SUMMARY: AgentSummary = {
+    "decisions": [],
+    "constraints": [],
+    "open_tasks": [],
+    "context": ""
+}
+
+summary_llm = ChatGoogleGenerativeAI(
+    model=GEMINI_MODEL_ID,
+    temperature=0.0,          # production safe
+    max_output_tokens=400,
+    max_retries=2,
+)
+
 # -------------------------------
 # LLM configuration
 # -------------------------------
 llm = ChatGoogleGenerativeAI(
     model=GEMINI_MODEL_ID,
     api_key=os.getenv("GEMINI_API_KEY"),
-    temperature=0,
-    max_tokens=None,
+    temperature=0.5,
+    max_output_tokens=1024,
     timeout=None,
     max_retries=2,
 )
@@ -84,38 +144,76 @@ tools = [
     query_database,
     auto_allocate_vehicle
 ]
-
+ 
 model_with_tools = llm.bind_tools(tools)
-tool_node = ToolNode(tools)
-
-
+ 
 # -------------------------------
 # Nodes
 # -------------------------------
+tool_node = ToolNode(tools)
+
+
+def should_summarize(messages: list) -> bool:
+    return (
+        len(messages) >= 6 or
+        count_tokens_approximately(messages) > 1800
+    )
+
+
+def format_messages(messages: list[BaseMessage]) -> str:
+    return "\n".join(
+        f"{m.type.upper()}: {m.content}" for m in messages
+    )
+
+async def summarization_node(state: GraphState):
+    messages = state.get("messages", [])
+    summary = state.get("summary", INITIAL_SUMMARY)
+    
+    if not should_summarize(messages):
+        return state # No summarization needed, continue the flow
+    
+    prompt = SUMMARY_PROMPT.format(
+        previous_summary=json.dumps(summary, ensure_ascii=False),
+        messages=format_messages(messages)
+    )
+
+    try:
+        reponse = await summary_llm.ainvoke(prompt)
+        new_summary = json.loads(reponse.content)
+    except Exception as e:
+        logger.error(f"Summarization failed — keeping messages intact")
+        return state # Fail safe
+
+    return {
+        "summary": new_summary,
+        "messages": [] # Messages have been summarized
+    }
+
 async def get_schema_node(state: GraphState) -> GraphState:
     """Fetch the full schema (tables + columns) from public schema."""
+    writer = get_stream_writer()
+    writer("📊 Loading database schema...")
+    
     runtime = get_runtime()
     db = runtime.context.db
-    sql_tables = "SELECT table_name FROM information_schema.tables WHERE table_schema='public';"
-    result = await db.execute(text(sql_tables))
-    tables = [
-        row[0] 
-        for row in result.fetchall()
-    ]
-
+    
+    # Single query to get all tables and columns to avoid connection conflicts
+    sql_schema = """
+        SELECT t.table_name, c.column_name
+        FROM information_schema.tables t
+        JOIN information_schema.columns c ON t.table_name = c.table_name
+        WHERE t.table_schema = 'public' AND c.table_schema = 'public'
+        ORDER BY t.table_name, c.ordinal_position;
+    """
+    
+    result = await db.execute(text(sql_schema))
+    rows = result.fetchall()
+    
     schema = {}
-    for table in tables:
-        sql_columns = f"""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name='{table}';
-        """
-        result = await db.execute(text(sql_columns))
-        columns = [
-            row[0] 
-            for row in result.fetchall()
-        ]
-        schema[table] = columns
+    for table_name, column_name in rows:
+        if table_name not in schema:
+            schema[table_name] = []
+        schema[table_name].append(column_name)
 
     return {
         "schema": schema,
@@ -125,22 +223,38 @@ async def get_schema_node(state: GraphState) -> GraphState:
 def db_disabled_node(state: GraphState) -> GraphState:
     """Handles the case where the database is empty or unreachable."""
 
-    error_message = ("O nosso banco de dados está vazio. "
-                    "Por favor, adicione dados para que eu possa ajudar você.")
+    error_message = "Apparently our database is not configured. Aborting further operations"
     return {
         "messages": [AIMessage(content=error_message)]
     }
 
 
-def llm_node(state: GraphState) -> GraphState:
+async def llm_node(state: GraphState):
     """Main reasoning node with tool bindings."""
+    writer = get_stream_writer()
+    writer("🤖 Thinking...")
+    
+    summary = state.get("summary", INITIAL_SUMMARY)
     user_name = state.get("user_name")
     schema = state.get("schema")
 
-    msgs = [SystemMessage(content=SYSTEM.format(schema=schema, user_name=user_name))]
-    msgs += state["messages"]
+    msgs = [
+        SystemMessage(
+            content=SYSTEM.format(schema=schema, user_name=user_name)
+        ),
+        SystemMessage(
+            content=CONVERSATION_SUMMARY_PROMPT.format(
+                decisions="\n".join(summary["decisions"]),
+                constraints="\n".join(summary["constraints"]),
+                open_tasks="\n".join(summary["open_tasks"]),
+                context=summary["context"]
+            )
+        )
+    ]
+    
+    msgs.extend(state.get("messages", []))
 
-    ai: AIMessage = model_with_tools.invoke(msgs)
+    ai: AIMessage = await model_with_tools.ainvoke(msgs)
 
     return {"messages": [ai]}
 
@@ -152,17 +266,18 @@ def route_from_llm(state: GraphState):
     """Decide whether to call tools or end after LLM."""
     last = state["messages"][-1]
     if isinstance(last, AIMessage) and last.tool_calls:
-        return "tools"
+        return "tools" # Proceed to tools node
     
     return END
 
 
-def route_from_db(state: GraphState):
+def check_db(state: GraphState):
     """Decide whether to continue to LLM or terminate if DB is empty."""
-    if state.get("schema") and len(state["schema"]) > 0:
-        return "llm"
+    schema = state.get("schema")
+    if schema and len(schema) > 0:
+        return "summarize" # Proceed to LLM reasoning
     
     logger.warning("DB unavailable or no tables → routing to db_disabled.")
-
-    return "db_disabled"
+    return "db_disabled" 
     
+

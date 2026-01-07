@@ -1,13 +1,14 @@
 import os
 from dotenv import load_dotenv
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from .environment import get_database_url, get_checkpointer_url
 
 # Load env variables 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-DATABASE_URL_CHECKPOINTER = os.getenv("DATABASE_URL_CHECKPOINTER")
+DATABASE_URL = get_database_url()
+DATABASE_URL_CHECKPOINTER = get_checkpointer_url()
 
 engine = create_async_engine(
     DATABASE_URL,

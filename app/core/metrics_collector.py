@@ -1,7 +1,7 @@
 import logging
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, Integer
 from datetime import datetime, timedelta
 
 from models.metrics import Metrics
@@ -35,7 +35,7 @@ class MetricsCollector:
             duration_ms=duration_ms,
             success=success,
             error_message=error_message,
-            metadata=extra_data
+            extra_data=extra_data
         )
         
         self.db.add(metric) 
@@ -55,7 +55,7 @@ class MetricsCollector:
             func.count().label('total_calls'),  
             func.avg(Metrics.duration_ms).label('avg_duration_ms'),  
             func.max(Metrics.duration_ms).label('max_duration_ms'),  
-            func.sum(Metrics.success.cast('integer')).label('success_count'), 
+            func.sum(Metrics.success.cast(Integer)).label('success_count'), 
             func.count().label('total_count')  
         ).where(
             Metrics.created_at >= since  # Filter by period
