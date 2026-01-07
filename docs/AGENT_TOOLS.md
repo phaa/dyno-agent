@@ -4,6 +4,55 @@
 
 The Dyno-Agent system implements **9 specialized tools** that enable the LangGraph AI agent to perform complex vehicle allocation operations through natural language interactions.
 
+## Agent Execution Flow
+
+The LangGraph agent follows a sophisticated execution pattern with database availability checks, tool orchestration, and state management:
+
+```mermaid
+graph TD
+    START([Entry Point]) --> get_schema[Get Schema Node]
+    
+    get_schema --> check_db{Check DB Available?}
+    
+    check_db -->|DB Available| summarize[Summarize Node]
+    check_db -->|DB Unavailable| db_disabled[DB Disabled Node]
+    
+    db_disabled --> END_DB([End - DB Error])
+    
+    summarize --> llm[LLM Node<br/>Tool Binding & Reasoning]
+    
+    llm --> route{Route from LLM}
+    
+    route -->|Tool Call Required| tools[Tools Node<br/>Execute Agent Tools]
+    route -->|No Tool Call| END_SUCCESS([End - Complete])
+    
+    tools --> summarize
+    
+    %% Styling
+    classDef entryNode fill:#e1f5fe
+    classDef processNode fill:#f3e5f5
+    classDef decisionNode fill:#fff3e0
+    classDef endNode fill:#e8f5e8
+    classDef errorNode fill:#ffebee
+    
+    class START,END_SUCCESS,END_DB endNode
+    class get_schema,summarize,llm,tools processNode
+    class check_db,route decisionNode
+    class db_disabled errorNode
+```
+
+### Flow Components
+
+- **Get Schema**: Dynamically fetches database schema for LLM context
+- **Check DB**: Verifies database availability and routes execution
+- **Summarize**: Prepares conversation context and tool results
+- **LLM Node**: Core reasoning with tool binding and decision making
+- **Tools Node**: Executes the 9 specialized agent tools
+- **DB Disabled**: Graceful fallback when database is unavailable
+
+### Main Loop
+The agent executes in a loop: `summarize → llm → tools → summarize` until the LLM determines the task is complete (no tool calls required).
+
 ## Tool Inventory
 
 ### 1. **get_datetime_now**

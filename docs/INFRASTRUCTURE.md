@@ -11,6 +11,92 @@ Terraform for deploying Dyno-Agent project on AWS using:
 
 ## Architecture Overview
 
+```mermaid
+graph TB
+    subgraph "Internet"
+        Users[👥 Users]
+    end
+    
+    subgraph "AWS VPC"
+        subgraph "Public Subnets"
+            ALB[🔄 Application Load Balancer]
+        end
+        
+        subgraph "Private Subnets"
+            subgraph "ECS Fargate Cluster"
+                FastAPI[🚀 FastAPI App<br/>0.5 vCPU, 1GB RAM]
+                Prometheus[📊 Prometheus<br/>0.5 vCPU, 1GB RAM]
+                Grafana[📈 Grafana<br/>0.5 vCPU, 1GB RAM]
+            end
+            
+            RDS[(🗄️ RDS PostgreSQL<br/>db.t3.micro, 20GB)]
+        end
+        
+        EFS[💾 EFS Storage<br/>Monitoring Data]
+    end
+    
+    subgraph "AWS Services"
+        ECR[📦 ECR Registry]
+        Secrets[🔐 Secrets Manager]
+        CloudWatch[☁️ CloudWatch Logs]
+    end
+    
+    %% User Flow
+    Users --> ALB
+    ALB --> FastAPI
+    ALB --> Prometheus
+    ALB --> Grafana
+    
+    %% Data Flow
+    FastAPI --> RDS
+    FastAPI --> Secrets
+    Prometheus --> EFS
+    Grafana --> EFS
+    
+    %% Deployment Flow
+    ECR --> FastAPI
+    ECR --> Prometheus
+    ECR --> Grafana
+    
+    %% Monitoring Flow
+    FastAPI --> CloudWatch
+    FastAPI --> Prometheus
+    
+    %% Environment Detection
+    FastAPI -.->|PRODUCTION=true| RDS
+    FastAPI -.->|asyncpg + psycopg2| RDS
+```
+
+### Environment Detection Flow
+
+```mermaid
+flowchart LR
+    Start([Application Start]) --> Check{PRODUCTION?}
+    
+    Check -->|false| Dev[Development Mode]
+    Check -->|true| Prod[Production Mode]
+    
+    Dev --> DockerDB[(🐳 Docker PostgreSQL<br/>db:5432<br/>sslmode=disable)]
+    Prod --> AWSRDS[(☁️ AWS RDS<br/>rds-endpoint:5432<br/>sslmode=require)]
+    
+    DockerDB --> SQLAlchemy[SQLAlchemy<br/>asyncpg driver]
+    DockerDB --> Checkpointer[LangGraph<br/>psycopg2 driver]
+    
+    AWSRDS --> SQLAlchemy2[SQLAlchemy<br/>asyncpg driver]
+    AWSRDS --> Checkpointer2[LangGraph<br/>psycopg2 driver]
+    
+    style Dev fill:#e1f5fe
+    style Prod fill:#fff3e0
+    style DockerDB fill:#e8f5e8
+    style AWSRDS fill:#fff8e1
+```
+
+**Key Features**:
+- **Single Variable Control**: `PRODUCTION=true/false` determines entire environment
+- **Automatic SSL**: Production uses `sslmode=require`, development uses `sslmode=disable`
+- **Dual Drivers**: SQLAlchemy (`asyncpg`) + LangGraph (`psycopg2`) for optimal performance
+- **Zero Configuration**: No hardcoded credentials, all from environment variables
+
 - **Application**: Single ECS task (desired_count = 1)
 - **Database**: Basic RDS instance (20GB storage)
 - **Monitoring**: Prometheus + Grafana on ECS with EFS storage
@@ -18,6 +104,52 @@ Terraform for deploying Dyno-Agent project on AWS using:
 - **Network**: Private subnets for services, public subnets for ALB
 
 ## Quick Setup
+
+### Environment Configuration
+
+**Automatic Environment Detection**: The system uses a single `PRODUCTION` boolean variable to automatically configure database connections and other environment-specific settings.
+
+```mermaid
+flowchart TD
+    EnvVar[PRODUCTION Environment Variable] --> Decision{Value?}
+    
+    Decision -->|false| DevConfig[Development Configuration]
+    Decision -->|true| ProdConfig[Production Configuration]
+    
+    DevConfig --> DevDB[DATABASE_URL<br/>postgresql+asyncpg://...@db:5432/...]
+    DevConfig --> DevCheck[DATABASE_URL_CHECKPOINTER<br/>postgresql://...@db:5432/...?sslmode=disable]
+    
+    ProdConfig --> ProdDB[DATABASE_URL_PROD<br/>postgresql+asyncpg://...@rds-endpoint:5432/...]
+    ProdConfig --> ProdCheck[DATABASE_URL_CHECKPOINTER_PROD<br/>postgresql://...@rds-endpoint:5432/...?sslmode=require]
+    
+    DevDB --> App1[FastAPI Application]
+    DevCheck --> App1
+    ProdDB --> App2[FastAPI Application]
+    ProdCheck --> App2
+    
+    style DevConfig fill:#e1f5fe
+    style ProdConfig fill:#fff3e0
+    style EnvVar fill:#f3e5f5
+```
+
+**Development Setup (.env)**:
+```bash
+PRODUCTION=false
+DATABASE_URL=postgresql+asyncpg://dyno_user:dyno_pass@db:5432/dyno_db
+DATABASE_URL_CHECKPOINTER=postgresql://dyno_user:dyno_pass@db:5432/dyno_db?sslmode=disable
+```
+
+**Production Setup (terraform.tfvars)**:
+```bash
+production = true
+# Other production variables...
+```
+
+**Why This Approach?**
+- **Zero Configuration Errors**: Single variable controls all environment behavior
+- **Automatic SSL**: Production uses `sslmode=require`, development uses `sslmode=disable`
+- **Driver Optimization**: SQLAlchemy uses `asyncpg`, LangGraph checkpointer uses `psycopg2`
+- **AWS Integration**: Production variables automatically injected via Secrets Manager
 
 1. **Configure AWS credentials**:
 ```bash

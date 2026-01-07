@@ -15,7 +15,7 @@ GEMINI_API_KEY=AIzaSyB0MU5TnwEg_YNlAECwkfrcthL3PFNflSo
 # Get your key from LangSmith
 # https://smith.langchain.com/
 
-LANGCHAIN_API_KEY=ls__your_api_key_here
+LANGSMITH_API_KEY=ls__your_api_key_here
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_PROJECT=dyno-agent-production
 ```
@@ -56,7 +56,7 @@ nano .env
 GEMINI_API_KEY=your_gemini_key_here
 
 # Optional (but recommended):
-LANGCHAIN_API_KEY=your_langsmith_key_here
+LANGSMITH_API_KEY=your_langsmith_key_here
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_PROJECT=dyno-agent-production
 ```

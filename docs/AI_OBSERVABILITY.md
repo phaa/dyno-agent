@@ -12,7 +12,7 @@
 ```python
 # LangGraph automatically traces to LangSmith - no decorators needed!
 # Just configure environment variables:
-LANGCHAIN_API_KEY=your_key_here
+LANGSMITH_API_KEY=your_key_here
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_PROJECT=dyno-agent-production
 ```
@@ -81,7 +81,7 @@ curl -H "Authorization: Bearer TOKEN" \
 #### **LangSmith Auto-Tracing**
 ```bash
 # No code changes needed - LangGraph handles everything!
-LANGCHAIN_API_KEY=your_key_here
+LANGSMITH_API_KEY=your_key_here
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_PROJECT=dyno-agent-production
 ```

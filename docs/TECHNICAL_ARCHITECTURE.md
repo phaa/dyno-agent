@@ -136,6 +136,64 @@ async def auto_allocate_vehicle(...):
 
 ## Database Architecture
 
+### Environment Detection & Database Configuration
+
+**Automatic Environment Detection**: The system automatically detects whether it's running in development or production using a single `PRODUCTION` boolean variable, eliminating manual configuration errors.
+
+```python
+# Automatic environment detection
+def is_production() -> bool:
+    """Detecta se está em produção via variável PRODUCTION"""
+    return os.getenv("PRODUCTION", "false").lower() == "true"
+
+def get_database_url() -> str:
+    """Retorna URL do banco SQLAlchemy baseada no ambiente"""
+    if is_production():
+        # AWS RDS - asyncpg para SQLAlchemy
+        return os.getenv("DATABASE_URL_PROD", os.getenv("DATABASE_URL"))
+    else:
+        # Docker local - asyncpg
+        return os.getenv("DATABASE_URL", "postgresql+asyncpg://dyno_user:dyno_pass@db:5432/dyno_db")
+
+def get_checkpointer_url() -> str:
+    """Retorna URL do banco para LangGraph checkpointer baseada no ambiente"""
+    if is_production():
+        # AWS RDS - psycopg2 para checkpointer
+        return os.getenv("DATABASE_URL_CHECKPOINTER_PROD", os.getenv("DATABASE_URL_CHECKPOINTER"))
+    else:
+        # Docker local - psycopg2
+        return os.getenv("DATABASE_URL_CHECKPOINTER", "postgresql://dyno_user:dyno_pass@db:5432/dyno_db?sslmode=disable")
+```
+
+**Why Different Database Drivers?**
+
+**Critical Architecture Decision**: The system uses **two different PostgreSQL drivers** for different components:
+
+- **SQLAlchemy**: `asyncpg` driver for high-performance async database operations
+- **LangGraph Checkpointer**: `psycopg2` driver for conversation state persistence
+
+**Environment Configuration**:
+
+**Development (.env):**
+```bash
+PRODUCTION=false
+DATABASE_URL=postgresql+asyncpg://dyno_user:dyno_pass@db:5432/dyno_db
+DATABASE_URL_CHECKPOINTER=postgresql://dyno_user:dyno_pass@db:5432/dyno_db?sslmode=disable
+```
+
+**Production (AWS Secrets Manager):**
+```bash
+PRODUCTION=true
+DATABASE_URL_PROD=postgresql+asyncpg://user:pass@rds-endpoint.amazonaws.com:5432/dyno_db
+DATABASE_URL_CHECKPOINTER_PROD=postgresql://user:pass@rds-endpoint.amazonaws.com:5432/dyno_db?sslmode=require
+```
+
+**Benefits of This Approach**:
+- **Zero Configuration**: Automatic detection eliminates deployment errors
+- **Driver Compatibility**: Each component uses its optimal driver
+- **SSL Handling**: Automatic SSL configuration for production (require) vs development (disable)
+- **Single Source of Truth**: One `PRODUCTION` variable controls all environment behavior
+
 ### Why PostgreSQL + SQLAlchemy 2.0?
 
 **Decision Rationale**: Chose PostgreSQL over MongoDB/DynamoDB because vehicle allocation requires **ACID transactions** and **complex relational queries**. The automotive industry demands zero data inconsistency - a double-booked dyno could cost thousands in delayed testing.
@@ -233,6 +291,23 @@ CREATE TABLE dynos (
     supported_test_types TEXT[] DEFAULT '{}'
 );
 ```
+
+### Scheduling conflict detection
+
+Current implementation uses simple date overlap predicates:
+
+- `end_date >= start`
+- `start_date <= end`
+
+This was chosen for:
+- clarity
+- B-tree index compatibility
+- low overhead at moderate scale
+
+#### Scaling note
+For high-volume scenarios (millions of allocations),
+this can be migrated to PostgreSQL `daterange`
+with GiST indexing for logarithmic overlap queries.
 
 ### Smart Allocation Algorithm Implementation
 

@@ -83,6 +83,7 @@ This document is the entry point for the system. You can read more detailed topi
 ### Observability
 | Document | Description |
 |----------|-------------|
+| **[Grafana Dashboard Setup](docs/GRAFANA_SETUP.md)** | Configuração completa do Grafana, troubleshooting de dashboard vazio |
 | **[Monitoring Quickstart](QUICK_START.md)** | Quickstart the monitoring stack |
 | **[Metrics & Observability](docs/METRICS_SYSTEM.md)** | Production metrics system, performance tracking, and business impact measurement |
 | **[AI Observability](docs/AI_OBSERVABILITY.md)** | LangSmith integration, conversation analytics, and AI cost monitoring |
@@ -176,7 +177,7 @@ cd dyno-agent
 cp .env.example .env
 # Edit .env with your API keys:
 # - GEMINI_API_KEY (required)
-# - LANGCHAIN_API_KEY (optional)
+# - LANGSMITH_API_KEY (optional)
 # - AWS credentials (optional)
 
 # Start all services (app + local PostgreSQL + monitoring)
@@ -264,37 +265,37 @@ Production database operations use AWS RDS instead of local Docker containers. T
 
 ```bash
 # Health check
-curl http://localhost:8000/health
+curl http://localhost:8000/health/check
 # Production: curl https://your-alb-endpoint.amazonaws.com/health
 
 # Authentication - Register
 curl -X POST http://localhost:8000/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com", "password": "secure123"}'
+  -d '{"fullname": "John Doe", "email": "johndoe@example.com", "password": "secure123"}'
 
 # Authentication - Login
 curl -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email": "user@example.com", "password": "secure123"}'
+  -d '{"email": "johndoe@example.com", "password": "secure123"}'
 # Returns: {"access_token": "eyJ...", "token_type": "bearer"}
 
 # Chat with AI agent (SSE streaming)
-curl -X POST http://localhost:8000/chat/chat/stream \
+curl -X POST http://localhost:8000/chat/stream \
   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"message": "Find available dynos for AWD vehicle next week"}'
 
 # Performance metrics
 curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  http://localhost:8000/metrics/performance?hours=24
+  "http://localhost:8000/metrics/performance?hours=24"
 
 # Business impact metrics
 curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  http://localhost:8000/metrics/business
+  "http://localhost:8000/metrics/business"
 
 # Conversation metrics
 curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  http://localhost:8000/chat/metrics/conversation?hours=24
+  "http://localhost:8000/chat/metrics?hours=24" 
 
 # Prometheus metrics (public endpoint)
 curl http://localhost:8000/metrics/prometheus
@@ -474,7 +475,6 @@ make prometheus-url # http://localhost:9090
 - [ ] **Comprehensive test coverage**: Integration tests, load testing, coverage reporting
 - [ ] **WebSocket support**: Real-time updates for allocation changes
 - [ ] **Advanced caching layer**: Redis for performance optimization
-- [ ] **Kubernetes migration**: From ECS to Kubernetes for better orchestration
 
 ---
 
