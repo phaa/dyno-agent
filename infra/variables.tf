@@ -1,3 +1,9 @@
+variable "production" {
+  description = "Indica se é ambiente de produção"
+  type        = bool
+  default     = true
+}
+
 variable "region" {
   default = "us-east-1"
 }

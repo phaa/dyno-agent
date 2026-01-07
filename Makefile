@@ -21,14 +21,20 @@ clean: ## Clean containers and volumes
 	docker-compose down -v
 	docker system prune -f
 
-test: ## Run tests
-	cd app && python -m pytest
+test:
+	docker compose exec fastapi pytest
+
+db-shell:
+	docker compose exec db psql -U dyno_user -d dyno_db
+
+new-migration:
+	docker compose exec fastapi alembic revision --autogenerate -m "$(msg)"
 
 migrate: ## Run database migrations
-	cd app && alembic upgrade head
+	docker compose exec fastapi alembic upgrade head
 
-seed: ## Seed database with test data
-	cd app && python scripts/seed_data.py
+seed:
+	docker compose exec fastapi python scripts/seed_data.py
 
 monitoring: ## Start only monitoring stack
 	docker-compose up -d prometheus grafana
@@ -58,3 +64,15 @@ prometheus-url: ## Show Prometheus URL
 
 status: ## Show status of all services
 	docker-compose ps
+
+infra-init:
+	cd infra && terraform init
+
+infra-plan:
+	cd infra && terraform plan
+
+infra-apply:
+	cd infra && terraform apply
+
+infra-destroy:
+	cd infra && terraform destroy

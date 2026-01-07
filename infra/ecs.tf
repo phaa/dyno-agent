@@ -78,6 +78,10 @@ resource "aws_ecs_task_definition" "fastapi" {
 
       secrets = [
         {
+          name      = "PRODUCTION"
+          valueFrom = "${aws_secretsmanager_secret.api.arn}:PRODUCTION::"
+        },
+        {
           name      = "HUGGING_FACE_HUB_TOKEN"
           valueFrom = "${aws_secretsmanager_secret.api.arn}:HUGGING_FACE_HUB_TOKEN::"
         },
@@ -86,8 +90,12 @@ resource "aws_ecs_task_definition" "fastapi" {
           valueFrom = "${aws_secretsmanager_secret.api.arn}:GEMINI_API_KEY::"
         },
         {
-          name      = "DATABASE_URL"
-          valueFrom = "${aws_secretsmanager_secret.api.arn}:DATABASE_URL::"
+          name      = "DATABASE_URL_PROD"
+          valueFrom = "${aws_secretsmanager_secret.api.arn}:DATABASE_URL_PROD::"
+        },
+        {
+          name      = "DATABASE_URL_CHECKPOINTER_PROD"
+          valueFrom = "${aws_secretsmanager_secret.api.arn}:DATABASE_URL_CHECKPOINTER_PROD::"
         },
         {
           name      = "JWT_SECRET"

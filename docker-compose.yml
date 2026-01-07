@@ -45,9 +45,11 @@ services:
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin  # Senha do admin
       - GF_USERS_ALLOW_SIGN_UP=false  # Desabilita cadastro público
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning  # Provisioning automático
     volumes:
       - grafana-storage:/var/lib/grafana  # Persistência de dados
-      - ./monitoring/grafana-dashboard.json:/var/lib/grafana/dashboards/dyno-agent.json  # Dashboard pré-configurado
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning  # Configuração automática
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards  # Dashboards
 
 volumes:
   grafana-storage:  # Volume nomeado para dados do Grafana
