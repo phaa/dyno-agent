@@ -1382,6 +1382,203 @@ engine = create_async_engine(
 
 ### Caching Strategy
 
+#### Schema Caching Implementation
+
+**Performance Optimization**: Implemented intelligent schema caching to eliminate redundant database queries on every conversation start.
+
+**Problem Solved**: The `get_schema_node` was executing a database query on every conversation to fetch table/column information, adding ~50-100ms latency per chat session.
+
+```python
+# Simple in-memory cache with TTL
+class SchemaCache:
+    """Simple in-memory cache for database schema with TTL."""
+    
+    def __init__(self, ttl_seconds: int = 3600):  # 1 hour default
+        self.ttl_seconds = ttl_seconds
+        self._cache: Optional[Dict[str, Any]] = None
+        self._timestamp: Optional[float] = None
+    
+    def get(self) -> Optional[Dict[str, Any]]:
+        """Get cached schema if valid."""
+        if not self._cache or not self._timestamp:
+            return None
+        
+        if time.time() - self._timestamp > self.ttl_seconds:
+            logger.info("Schema cache expired")
+            self._cache = None
+            self._timestamp = None
+            return None
+        
+        logger.info("Using cached schema")
+        return self._cache
+    
+    def set(self, schema: Dict[str, Any]) -> None:
+        """Cache the schema."""
+        self._cache = schema
+        self._timestamp = time.time()
+        logger.info(f"Schema cached with {len(schema)} tables")
+    
+    def invalidate(self) -> None:
+        """Manually invalidate cache."""
+        self._cache = None
+        self._timestamp = None
+        logger.info("Schema cache invalidated")
+
+# Global cache instance
+schema_cache = SchemaCache()
+```
+
+**Updated Schema Node with Caching**:
+```python
+async def get_schema_node(state: GraphState) -> GraphState:
+    """Fetch the full schema (tables + columns) from public schema with caching."""
+    writer = get_stream_writer()
+    
+    # Try cache first
+    cached_schema = schema_cache.get()
+    if cached_schema:
+        writer("📊 Using cached database schema")
+        return {"schema": cached_schema}
+    
+    writer("📊 Loading database schema...")
+    
+    # Only query database if cache miss
+    runtime = get_runtime()
+    db = runtime.context.db
+    
+    sql_schema = """
+        SELECT t.table_name, c.column_name
+        FROM information_schema.tables t
+        JOIN information_schema.columns c ON t.table_name = c.table_name
+        WHERE t.table_schema = 'public' AND c.table_schema = 'public'
+        ORDER BY t.table_name, c.ordinal_position;
+    """
+    
+    result = await db.execute(text(sql_schema))
+    rows = result.fetchall()
+    
+    schema = {}
+    for table_name, column_name in rows:
+        if table_name not in schema:
+            schema[table_name] = []
+        schema[table_name].append(column_name)
+
+    # Cache the result
+    schema_cache.set(schema)
+
+    return {"schema": schema}
+```
+
+**Admin Endpoints for Cache Management**:
+```python
+# Manual cache invalidation (useful after migrations)
+@router.post("/admin/cache/schema/invalidate")
+async def invalidate_schema_cache(token: str = Depends(JWTBearer())):
+    """Manually invalidate schema cache (useful after migrations)."""
+    schema_cache.invalidate()
+    return {"message": "Schema cache invalidated successfully"}
+
+@router.get("/admin/cache/schema/status")
+async def get_schema_cache_status(token: str = Depends(JWTBearer())):
+    """Get current schema cache status."""
+    cached_schema = schema_cache.get()
+    return {
+        "cached": cached_schema is not None,
+        "tables_count": len(cached_schema) if cached_schema else 0,
+        "ttl_seconds": schema_cache.ttl_seconds
+    }
+```
+
+**Benefits**:
+- **Performance**: Eliminates 50-100ms query per conversation
+- **Resource Efficiency**: Reduces PostgreSQL load
+- **Scalability**: Better performance with multiple ECS instances
+- **Flexibility**: Manual invalidation after schema changes
+
+#### Evolution Path: Redis Cache
+
+**Production Enhancement**: The current in-memory cache can be evolved to Redis for distributed caching across multiple ECS instances.
+
+```python
+# Future Redis implementation (same interface)
+class RedisSchemaCache:
+    """Redis-backed schema cache for distributed systems."""
+    
+    def __init__(self, redis_client, ttl_seconds: int = 3600):
+        self.redis = redis_client
+        self.ttl_seconds = ttl_seconds
+        self.cache_key = "dyno:schema:cache"
+    
+    async def get(self) -> Optional[Dict[str, Any]]:
+        """Get cached schema from Redis."""
+        try:
+            cached_data = await self.redis.get(self.cache_key)
+            if cached_data:
+                logger.info("Using Redis cached schema")
+                return json.loads(cached_data)
+            return None
+        except Exception as e:
+            logger.error(f"Redis cache error: {e}")
+            return None  # Graceful fallback
+    
+    async def set(self, schema: Dict[str, Any]) -> None:
+        """Cache schema in Redis with TTL."""
+        try:
+            await self.redis.setex(
+                self.cache_key,
+                self.ttl_seconds,
+                json.dumps(schema)
+            )
+            logger.info(f"Schema cached in Redis with {len(schema)} tables")
+        except Exception as e:
+            logger.error(f"Redis cache set error: {e}")
+    
+    async def invalidate(self) -> None:
+        """Remove schema from Redis."""
+        try:
+            await self.redis.delete(self.cache_key)
+            logger.info("Redis schema cache invalidated")
+        except Exception as e:
+            logger.error(f"Redis cache invalidation error: {e}")
+
+# Docker Compose Redis service
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+  
+  app:
+    # ...
+    depends_on: [redis]
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+
+volumes:
+  redis_data:
+```
+
+**Redis Cache Benefits**:
+- **Distributed**: Shared cache across multiple ECS instances
+- **Persistence**: Survives application restarts
+- **Advanced Features**: Pub/Sub for cache invalidation notifications
+- **Monitoring**: Redis metrics integration with Prometheus
+
+**Migration Strategy**:
+1. **Phase 1**: Current in-memory cache (implemented)
+2. **Phase 2**: Add Redis as optional backend
+3. **Phase 3**: Hybrid approach (Redis primary, memory fallback)
+4. **Phase 4**: Full Redis with cluster support
+
+**Cost Consideration**:
+- **ElastiCache Redis**: ~$15/month for t3.micro
+- **Self-managed Redis**: ~$5/month on ECS Fargate
+- **Performance Gain**: Shared cache reduces database load significantly
+
+#### Other Caching Opportunities
+
 ```python
 from functools import lru_cache
 from datetime import datetime, timedelta
