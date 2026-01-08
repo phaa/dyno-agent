@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage, SystemMessage, BaseMessage
 from langgraph.graph import END
 from sqlalchemy import text
 from core.config import GEMINI_MODEL_ID
+from core.cache import schema_cache
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.prebuilt import ToolNode
@@ -190,8 +191,15 @@ async def summarization_node(state: GraphState):
     }
 
 async def get_schema_node(state: GraphState) -> GraphState:
-    """Fetch the full schema (tables + columns) from public schema."""
+    """Fetch the full schema (tables + columns) from public schema with caching."""
     writer = get_stream_writer()
+    
+    # Try cache first
+    cached_schema = schema_cache.get()
+    if cached_schema:
+        writer("📊 Using cached database schema")
+        return {"schema": cached_schema}
+    
     writer("📊 Loading database schema...")
     
     runtime = get_runtime()
@@ -214,6 +222,9 @@ async def get_schema_node(state: GraphState) -> GraphState:
         if table_name not in schema:
             schema[table_name] = []
         schema[table_name].append(column_name)
+
+    # Cache the result
+    schema_cache.set(schema)
 
     return {
         "schema": schema,
