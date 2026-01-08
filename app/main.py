@@ -7,7 +7,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from core.db import DATABASE_URL_CHECKPOINTER
 from exceptions import ValidationError, validation_exception_handler
-from routers import allocation, auth, chat, health, metrics
+from routers import allocation, auth, chat, health, metrics, admin
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("langchain").setLevel(logging.DEBUG)
@@ -47,6 +47,7 @@ app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(allocation.router)
 app.include_router(metrics.router)
+app.include_router(admin.router)
 
 
 @app.get("/", tags=["root"])
