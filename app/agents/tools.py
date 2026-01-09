@@ -36,7 +36,11 @@ def get_datetime_now():
         The current date and time in YYYY-MM-DD HH:MM:SS format.
     """
     service = _get_service_from_runtime()
-    return service.get_datetime_now_core()
+
+    try:
+        return service.get_datetime_now_core()
+    except Exception as e:
+        return service.handle_exception_core(e)
 
 
 # ---------------------------------------
@@ -57,20 +61,24 @@ async def find_available_dynos(start_date: date, end_date: date, weight_lbs: int
         test_type: Type of test required (e.g., 'AWD', '2WD', 'brake')
 
     Returns:
-        A list of available dynos.
+        A list of the available dynos.
     """
     
     writer = get_stream_writer()
     writer("🔍 Searching database for available dynamometers...")
     
     service = _get_service_from_runtime()
-    return await service.find_available_dynos_core(
-        start_date=start_date,
-        end_date=end_date,
-        weight_lbs=weight_lbs,
-        drive_type=drive_type,
-        test_type=test_type
-    )
+
+    try:
+        return await service.find_available_dynos_core(
+            start_date=start_date,
+            end_date=end_date,
+            weight_lbs=weight_lbs,
+            drive_type=drive_type,
+            test_type=test_type
+        )
+    except Exception as e:
+            return service.handle_exception_core(e)
 
 
 @tool
@@ -82,14 +90,18 @@ async def check_vehicle_allocation(vehicle_id: int):
         vehicle_id: The ID of the vehicle
 
     Returns:
-        A list of strings describing allocations, or a message indicating none are scheduled.
+        A list of strings describing allocations of the specified vehicle.
     """
 
     writer = get_stream_writer()
     writer(f"🚗 Checking vehicle {vehicle_id} allocations...")
 
     service = _get_service_from_runtime()
-    return await service.check_vehicle_allocation_core(vehicle_id=vehicle_id)
+
+    try:
+        return await service.check_vehicle_allocation_core(vehicle_id=vehicle_id)
+    except Exception as e:
+        return service.handle_exception_core(e)
 
 
 @tool
@@ -105,7 +117,11 @@ async def detect_conflicts():
     writer("⚠️ Analyzing allocation conflicts...")
 
     service = _get_service_from_runtime()
-    return await service.detect_conflicts_core()
+
+    try:
+        return await service.detect_conflicts_core()
+    except Exception as e:
+        return service.handle_exception_core(e)
 
 
 @tool
@@ -121,7 +137,11 @@ async def completed_tests_count():
     writer("📊 Counting completed tests...")
 
     service = _get_service_from_runtime()
-    return await service.completed_tests_count_core()
+
+    try:
+        return await service.completed_tests_count_core()
+    except Exception as e:
+        return service.handle_exception_core(e)
 
 
 @tool
@@ -140,7 +160,11 @@ async def get_tests_by_status(status: str):
     writer(f"📄 Searching tests with status '{status}'...")
 
     service = _get_service_from_runtime()
-    return await service.get_tests_by_status_core(status=status)
+
+    try:
+        return await service.get_tests_by_status_core(status=status)
+    except Exception as e:
+        return service.handle_exception_core(e)
 
 
 @tool
@@ -158,7 +182,11 @@ async def maintenance_check():
     writer("🔧 Checking dynamometer maintenance status...")
 
     service = _get_service_from_runtime()
-    return await service.maintenance_check_core()
+
+    try:
+        return await service.maintenance_check_core()
+    except Exception as e:
+        return service.handle_exception_core(e)
 
 
 @tool
@@ -166,8 +194,10 @@ async def query_database(sql: str):
     """
     Executes a secure SQL SELECT query on the database.
 
-    This is the agent's generic query mechanism.
-    Only SELECT statements are allowed.
+    - This is the agent's generic query mechanism.
+    - Only SELECT statements are allowed.
+    - Last resort for complex data retrieval needs.
+    - Avoid queries without where clauses.
 
     Args:
         sql (str): A SQL SELECT statement to execute.
@@ -182,15 +212,19 @@ async def query_database(sql: str):
     writer("📊 Executing custom database query...")
 
     service = _get_service_from_runtime()
-    return await service.query_database_core(sql=sql)
+
+    try:
+        return await service.query_database_core(sql=sql)
+    except Exception as e:
+        return service.handle_exception_core(e)
 
 
 @tool
 async def auto_allocate_vehicle(
+    start_date: date,
+    days_to_complete: int,
     vehicle_id: int = None,
     vin: str = None,
-    start_date: date = None,
-    days_to_complete: int = None,
     backup: bool = False,
     max_backup_days: int = 7
 ):
@@ -217,11 +251,16 @@ async def auto_allocate_vehicle(
     writer("⚙️ Attempting intelligent vehicle auto-allocation...")
 
     service = _get_service_from_runtime()
-    return await service.auto_allocate_vehicle_core(
-        vehicle_id=vehicle_id,
-        vin=vin,
-        start_date=start_date,
-        days_to_complete=days_to_complete,
-        backup=backup,
-        max_backup_days=max_backup_days
-    )
+
+    try:
+        result = await service.auto_allocate_vehicle_core(
+            vehicle_id=vehicle_id,
+            vin=vin,
+            start_date=start_date,
+            days_to_complete=days_to_complete,
+            backup=backup,
+            max_backup_days=max_backup_days
+        )
+        return result
+    except Exception as e:
+        return service.handle_exception_core(e)
