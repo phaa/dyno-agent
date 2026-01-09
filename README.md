@@ -25,6 +25,25 @@
 
 ---
 
+## Why This Project Matters
+
+Most AI projects fail in production due to:
+- uncontrolled LLM costs
+- lack of observability
+- race conditions and data inconsistency
+
+Dyno-Agent was designed to explicitly address these risks.
+
+---
+
+## How to Read This Repository
+
+- 5 minutes: README.md (this file)
+- 15 minutes: DEMONSTRATION.md + TECHNICAL_ARCHITECTURE.md
+- Deep dive: docs/ folder
+
+---
+
 ## System Architecture
 
 ```mermaid
@@ -82,8 +101,8 @@ This document is the entry point for the system. You can read more detailed topi
 
 ### Observability
 | Document | Description |
-|----------|-------------|
-| **[Grafana Dashboard Setup](docs/GRAFANA_SETUP.md)** | Configuração completa do Grafana, troubleshooting de dashboard vazio |
+|----------|-------------| 
+| **[Grafana Dashboard Setup](docs/GRAFANA_SETUP.md)** | Complete Grafana configuration and troubleshooting |
 | **[Monitoring Quickstart](QUICK_START.md)** | Quickstart the monitoring stack |
 | **[Metrics & Observability](docs/METRICS_SYSTEM.md)** | Production metrics system, performance tracking, and business impact measurement |
 | **[AI Observability](docs/AI_OBSERVABILITY.md)** | LangSmith integration, conversation analytics, and AI cost monitoring |
@@ -284,6 +303,7 @@ curl -X POST http://localhost:8000/chat/stream \
   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"message": "Find available dynos for AWD vehicle next week"}'
+  --no-buffer
 
 # Performance metrics
 curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
@@ -345,7 +365,8 @@ terraform output prometheus_url
 
 ## Performance Metrics
 
-Real-time system performance tracking with business impact measurement and ROI analysis.
+Real-time system performance tracking with business impact measurement and ROI analysis. System performance metrics are measured locally and in staging.
+Business impact metrics are projected based on industry benchmarks
 
 **→ See more in [Metrics & Observability](docs/METRICS_SYSTEM.md)**
 
@@ -365,7 +386,7 @@ Real-time system performance tracking with business impact measurement and ROI a
 
 ## Testing Strategy
 
-Basic test suite with unit tests and health checks. Comprehensive integration testing planned for future releases.
+Current test suite focuses on critical paths and health checks. Extended integration and load testing are planned as the system scales.
 
 **→ See more in [Troubleshooting Guide](docs/TROUBLESHOOTING.md)**
 
@@ -498,7 +519,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Author
 
 **Pedro Henrique Azevedo**  
-*AI Engineer @ Ford Motor Company*
+*AI Engineer (Automotive & Industrial Systems)*
 
 - 🔗 LinkedIn: [linkedin.com/in/pedrohazevedo/](https://www.linkedin.com/in/pedrohazevedo/)
 - 📧 Email: dev.phazevedo@gmail.com
@@ -519,10 +540,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### **For Recruiters & Hiring Managers**
 - **Real-world Impact**: Saved 100+ hours monthly at Ford Motor Company
-- **Production System**: Currently running in Ford's Michigan Proving Grounds
+- **Production System**: This project treats LLMs as a metered infrastructure dependency, not as the core execution engine.
 - **Technical Complexity**: Enterprise-grade AI with sophisticated constraint solving
 - **Full Ownership**: End-to-end development from requirements to deployment
-- **AI Observability**: Complete conversation tracking with LangSmith integration
 - **AI Observability**: Complete conversation tracking with LangSmith integration
 
 ### **For Technical Leaders**
