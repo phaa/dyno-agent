@@ -1,5 +1,6 @@
 import json
 import time
+import logging
 from dataclasses import dataclass
 from typing import AsyncGenerator
 
@@ -18,6 +19,11 @@ from core.db import get_db
 from core.metrics import track_performance
 from core.conversation_metrics import ConversationMetrics
 from schemas.chat import ChatRequest
+
+logging.basicConfig(level=logging.DEBUG)
+logging.getLogger("langchain").setLevel(logging.DEBUG)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -61,131 +67,162 @@ async def chat_stream(
 
     async def event_generator() -> AsyncGenerator[str, None]:
         start_time = time.time()
-
         last_ai_message_id: str | None = None
-
-        # Final assistant message (UI only)
         final_assistant_response: str | None = None
+        conversation = None
+        conv_service = None
         
-        graph = await build_graph(checkpointer)
-        conv_service = ConversationService(db=db)
-        
-        conversation = await conv_service.get_or_create_conversation(
-            user_email=user_email,
-            conversation_id=conv_id
-        )
+        try:
+            # Initialize services
+            graph = await build_graph(checkpointer)
+            conv_service = ConversationService(db=db)
+            
+            # Get or create conversation
+            conversation = await conv_service.get_or_create_conversation(
+                user_email=user_email,
+                conversation_id=conv_id
+            )
 
-        # Save user message
-        await conv_service.save_message(
-            conversation_id=conversation.id,
-            role="user",
-            content=user_message
-        )
+            # Save user message
+            await conv_service.save_message(
+                conversation_id=conversation.id,
+                role="user",
+                content=user_message
+            )
 
-        inputs = {
-            "messages": [HumanMessage(content=user_message)],
-            "user_name": existing_user.fullname.split(" ")[0],
-        }
-
-        config = {
-            "configurable": {
-                "thread_id": f"{user_email}_{conversation.id}"
+            inputs = {
+                "messages": [HumanMessage(content=user_message)],
+                "user_name": existing_user.fullname.split(" ")[0],
             }
-        }
 
-        context = UserContext(db=db)
+            config = {
+                "configurable": {
+                    "thread_id": f"{user_email}_{conversation.id}"
+                }
+            }
 
-        stream_args = {
-            "input": inputs,
-            "config": config,
-            "context": context,
-            "stream_mode": ["updates", "custom"], 
-        }
+            context = UserContext(db=db)
 
-        async for stream_mode, chunk in graph.astream(**stream_args):
-            # STATUS STREAM (writer)
-            if stream_mode == "custom":   
-                payload = json.dumps({
-                    "type": "status",
-                    "content": chunk
-                })
+            stream_args = {
+                "input": inputs,
+                "config": config,
+                "context": context,
+                "stream_mode": ["updates", "custom"], 
+            }
 
-                await conv_service.save_message(
-                    conversation_id=conversation.id,
-                    role="status",
-                    content=chunk,
-                )
-                
-                yield f"data: {payload}\n\n" 
-                continue
-            
-            # ASSISTANT STREAM 
-            if stream_mode != "updates":
-                continue
-                
-            for _, data in chunk.items():
-                if not data or "messages" not in data:
+            # Stream processing
+            async for stream_mode, chunk in graph.astream(**stream_args):
+                try:
+                    # STATUS STREAM (writer)
+                    if stream_mode == "custom":   
+                        payload = json.dumps({
+                            "type": "status",
+                            "content": chunk
+                        })
+
+                        try:
+                            await conv_service.save_message(
+                                conversation_id=conversation.id,
+                                role="status",
+                                content=chunk,
+                            )
+                        except Exception:
+                            # Continue streaming even if status save fails
+                            pass
+                        
+                        yield f"data: {payload}\n\n" 
+                        continue
+                    
+                    # ASSISTANT STREAM 
+                    if stream_mode != "updates":
+                        continue
+                        
+                    for _, data in chunk.items():
+                        if not data or "messages" not in data:
+                            continue
+
+                        ai_messages = [
+                            msg for msg in data["messages"] 
+                            if isinstance(msg, AIMessage) and msg.content
+                        ]
+
+                        if not ai_messages:
+                            continue
+
+                        msg = ai_messages[-1]  # only the newest
+
+                        if msg.id == last_ai_message_id:
+                            continue  # deduplicate
+
+                        last_ai_message_id = msg.id
+
+                        if isinstance(msg.content, list):
+                            contents = [
+                                item["text"]
+                                for item in msg.content
+                                if item.get("type") == "text"
+                            ]
+                            response_text = "\n".join(contents)
+                        else:
+                            response_text = msg.content
+
+                        final_assistant_response = response_text
+                        
+                        payload = json.dumps({
+                            "type": "assistant",
+                            "content": response_text
+                        })
+
+                        try:
+                            await conv_service.save_message(
+                                conversation_id=conversation.id,
+                                role="assistant",
+                                content=response_text,
+                            )
+                        except Exception:
+                            # Continue streaming even if message save fails
+                            pass
+                        
+                        yield f"data: {payload}\n\n"
+                        
+                except Exception as chunk_error:
+                    # Log chunk processing error but continue streaming
+                    error_payload = json.dumps({
+                        "type": "error",
+                        "content": "Erro processando resposta"
+                    })
+                    yield f"data: {error_payload}\n\n"
                     continue
 
-                ai_messages = [
-                    msg for msg in data["messages"] 
-                    if isinstance(msg, AIMessage) and msg.content
-                ]
-
-                if not ai_messages:
-                    continue
-
-                msg = ai_messages[-1]  # only the newest
-
-                if msg.id == last_ai_message_id:
-                    continue  # deduplicate
-
-                last_ai_message_id = msg.id
-
-                if isinstance(msg.content, list):
-                    contents = [
-                        item["text"]
-                        for item in msg.content
-                        if item.get("type") == "text"
-                    ]
-                    response_text = "\n".join(contents)
-                else:
-                    response_text = msg.content
-
-                final_assistant_response = response_text
-                
-                payload = json.dumps({
-                    "type": "assistant",
-                    "content": response_text
-                })
-
-                await conv_service.save_message(
-                    conversation_id=conversation.id,
-                    role="assistant",
-                    content=response_text,
-                )
-                
-                yield f"data: {payload}\n\n"
+        except Exception as e:
+            # Handle major errors
+            error_payload = json.dumps({
+                "type": "error",
+                "content": f"Erro interno: {str(e)}"
+            })
+            yield f"data: {error_payload}\n\n"
             
-
-        
-
-        
-        # Track conversation metrics
-        duration_ms = (time.time() - start_time) * 1000
-
-        metrics_tracker = ConversationMetrics(db)
-        await metrics_tracker.track_conversation(
-            user_message=user_message,
-            assistant_response=final_assistant_response,
-            user_email=user_email,
-            conversation_id=conversation.id,
-            duration_ms=duration_ms,
-            tools_used=[]
-        )
-        
-        # End the stream
-        yield "data: [DONE]\n\n"
+        finally:
+            # Track metrics if possible
+            try:
+                if conversation and conv_service:
+                    duration_ms = (time.time() - start_time) * 1000
+                    metrics_tracker = ConversationMetrics(db)
+                    await metrics_tracker.track_conversation(
+                        user_message=user_message,
+                        assistant_response=final_assistant_response,
+                        user_email=user_email,
+                        conversation_id=conversation.id,
+                        duration_ms=duration_ms,
+                        tools_used=[]
+                    )
+            except Exception as e:
+                # Log metrics errors but continue
+                logger.error(f"Failed to track conversation metrics: {str(e)}")
+                pass
+            
+            # Always end the stream
+            yield "data: [DONE]\n\n"
 
     # Retorna a resposta como SSE
     return StreamingResponse(
