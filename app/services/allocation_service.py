@@ -15,14 +15,12 @@ from models.vehicle import Vehicle
 from core.metrics import track_performance
 
 # Exceptions
-from exceptions import (
+from services.exceptions import (
     AllocationDomainError,
     InvalidQueryError,
     NoAvailableDynoError,
     InvalidDateRangeError,
     VehicleAlreadyAllocatedError,
-    DynoIncompatibleError,
-    InvalidAllocationStateError,
     DatabaseQueryError
 )
 

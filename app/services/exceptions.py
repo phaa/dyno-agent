@@ -10,12 +10,6 @@ class InvalidDateRangeError(AllocationDomainError):
 class VehicleAlreadyAllocatedError(AllocationDomainError):
     """Raised when the vehicle already has an overlapping allocation."""
 
-class DynoIncompatibleError(AllocationDomainError):
-    """Raised when dyno does not support vehicle/test constraints."""
-
-class InvalidAllocationStateError(AllocationDomainError):
-    """Raised when an operation is not allowed in the current allocation state."""
-
 class DatabaseQueryError(AllocationDomainError):
     """Raised when a database query fails or returns unexpected results."""
 
