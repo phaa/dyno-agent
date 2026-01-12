@@ -36,11 +36,7 @@ def get_datetime_now():
         The current date and time in YYYY-MM-DD HH:MM:SS format.
     """
     service = _get_service_from_runtime()
-
-    try:
-        return service.get_datetime_now_core()
-    except Exception as e:
-        return service.handle_exception_core(e)
+    return service.get_datetime_now_core()
 
 
 # ---------------------------------------
@@ -68,17 +64,13 @@ async def find_available_dynos(start_date: date, end_date: date, weight_lbs: int
     writer("🔍 Searching database for available dynamometers...")
     
     service = _get_service_from_runtime()
-
-    try:
-        return await service.find_available_dynos_core(
-            start_date=start_date,
-            end_date=end_date,
-            weight_lbs=weight_lbs,
-            drive_type=drive_type,
-            test_type=test_type
-        )
-    except Exception as e:
-            return service.handle_exception_core(e)
+    return await service.find_available_dynos_core(
+        start_date=start_date,
+        end_date=end_date,
+        weight_lbs=weight_lbs,
+        drive_type=drive_type,
+        test_type=test_type
+    )
 
 
 @tool
@@ -98,10 +90,7 @@ async def check_vehicle_allocation(vehicle_id: int):
 
     service = _get_service_from_runtime()
 
-    try:
-        return await service.check_vehicle_allocation_core(vehicle_id=vehicle_id)
-    except Exception as e:
-        return service.handle_exception_core(e)
+    return await service.check_vehicle_allocation_core(vehicle_id=vehicle_id)
 
 
 @tool
@@ -117,11 +106,7 @@ async def detect_conflicts():
     writer("⚠️ Analyzing allocation conflicts...")
 
     service = _get_service_from_runtime()
-
-    try:
-        return await service.detect_conflicts_core()
-    except Exception as e:
-        return service.handle_exception_core(e)
+    return await service.detect_conflicts_core()
 
 
 @tool
@@ -137,11 +122,7 @@ async def completed_tests_count():
     writer("📊 Counting completed tests...")
 
     service = _get_service_from_runtime()
-
-    try:
-        return await service.completed_tests_count_core()
-    except Exception as e:
-        return service.handle_exception_core(e)
+    return await service.completed_tests_count_core()
 
 
 @tool
@@ -160,11 +141,7 @@ async def get_tests_by_status(status: str):
     writer(f"📄 Searching tests with status '{status}'...")
 
     service = _get_service_from_runtime()
-
-    try:
-        return await service.get_tests_by_status_core(status=status)
-    except Exception as e:
-        return service.handle_exception_core(e)
+    return await service.get_tests_by_status_core(status=status)
 
 
 @tool
@@ -182,11 +159,7 @@ async def maintenance_check():
     writer("🔧 Checking dynamometer maintenance status...")
 
     service = _get_service_from_runtime()
-
-    try:
-        return await service.maintenance_check_core()
-    except Exception as e:
-        return service.handle_exception_core(e)
+    return await service.maintenance_check_core()
 
 
 @tool
@@ -212,11 +185,7 @@ async def query_database(sql: str):
     writer("📊 Executing custom database query...")
 
     service = _get_service_from_runtime()
-
-    try:
-        return await service.query_database_core(sql=sql)
-    except Exception as e:
-        return service.handle_exception_core(e)
+    return await service.query_database_core(sql=sql)
 
 
 @tool
@@ -251,16 +220,24 @@ async def auto_allocate_vehicle(
     writer("⚙️ Attempting intelligent vehicle auto-allocation...")
 
     service = _get_service_from_runtime()
+    result = await service.auto_allocate_vehicle_core(
+        vehicle_id=vehicle_id,
+        vin=vin,
+        start_date=start_date,
+        days_to_complete=days_to_complete,
+        backup=backup,
+        max_backup_days=max_backup_days
+    )
+    return result
 
-    try:
-        result = await service.auto_allocate_vehicle_core(
-            vehicle_id=vehicle_id,
-            vin=vin,
-            start_date=start_date,
-            days_to_complete=days_to_complete,
-            backup=backup,
-            max_backup_days=max_backup_days
-        )
-        return result
-    except Exception as e:
-        return service.handle_exception_core(e)
+
+TOOLS = [
+    get_datetime_now,
+    find_available_dynos,
+    check_vehicle_allocation,
+    detect_conflicts,
+    completed_tests_count,
+    maintenance_check,
+    query_database,
+    auto_allocate_vehicle,
+]

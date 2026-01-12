@@ -1,6 +1,4 @@
 from typing import List, Optional, TypedDict
-from langchain.messages import AnyMessage
-from langmem.short_term import RunningSummary
 from langgraph.graph import MessagesState
 
 
@@ -12,6 +10,12 @@ class AgentSummary(TypedDict):
 
 
 class GraphState(MessagesState):
-    summary: AgentSummary
+    conversation_id: str
     user_name: str
+    summary: AgentSummary
+    # Error handling fields
+    retry_count: int = 2
+    error: Optional[str]
+    error_node: Optional[str]
+    # DB schema info
     schema: Optional[list[str]] = None

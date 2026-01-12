@@ -1,24 +1,14 @@
 import os
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages.utils import count_tokens_approximately
-from langgraph.prebuilt import ToolNode
 from core.config import GEMINI_MODEL_ID
+from ..tools import TOOLS
 from ..state import AgentSummary
-from ..tools import (
-    find_available_dynos,
-    check_vehicle_allocation,
-    detect_conflicts,
-    completed_tests_count,
-    maintenance_check,
-    query_database,
-    get_datetime_now,
-    auto_allocate_vehicle
-)
 
 # System prompt
 SYSTEM = """
 You are an assistant specialized in vehicle dynamometers.  
-You are free to use any of the given tools and query the following database:
+You are free to use any of the given tools to help with vehicle allocation and testing operations.
 
 {schema}
 
@@ -122,23 +112,9 @@ def get_llm():
     )
 
 # Tools setup - lazy initialization
-tools = [
-    get_datetime_now,
-    find_available_dynos,
-    check_vehicle_allocation,
-    detect_conflicts,
-    completed_tests_count,
-    maintenance_check,
-    query_database,
-    auto_allocate_vehicle
-]
-
 def get_model_with_tools():
     llm = get_llm()
-    return llm.bind_tools(tools)
-
-def get_tool_node():
-    return ToolNode(tools)
+    return llm.bind_tools(TOOLS)
 
 # Helper functions
 def should_summarize(messages: list) -> bool:

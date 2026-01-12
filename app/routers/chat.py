@@ -93,6 +93,7 @@ async def chat_stream(
             inputs = {
                 "messages": [HumanMessage(content=user_message)],
                 "user_name": existing_user.fullname.split(" ")[0],
+                "conversation_id": conversation.id,
             }
 
             config = {

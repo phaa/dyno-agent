@@ -15,7 +15,7 @@ async def llm_node(state: GraphState):
     
     summary = state.get("summary", INITIAL_SUMMARY)
     user_name = state.get("user_name")
-    schema = state.get("schema")
+    schema = state.get("schema", "Database schema will be loaded when needed for queries.")
 
     msgs = [
         SystemMessage(
