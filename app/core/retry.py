@@ -63,14 +63,14 @@ def async_retry(
         async def fetch_data():
             return await client.get('/data')
     
-    **Error Handling**:
+    Error Handling:
     - RetryableError: Retried up to max_attempts times
     - NonRetryableError: Raised immediately without retry
     - SQLAlchemyError: Treated as retryable (database transient failures)
     - asyncio.TimeoutError: Treated as retryable
     - Other exceptions: Treated as retryable with logging
     
-    **Backoff Strategy**:
+    Backoff Strategy:
     - Uses exponential backoff: delay = base_delay * (2 ^ attempt)
     - Capped at max_delay to prevent excessive waiting
     - Logs warning for each retry attempt

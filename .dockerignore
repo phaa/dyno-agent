@@ -1,6 +1,8 @@
 # Git
 .git
 .gitignore
+.github
+.gitlab-ci.yml
 
 # Docker
 Dockerfile
@@ -28,6 +30,10 @@ coverage.xml
 .mypy_cache
 .pytest_cache
 .hypothesis
+*.egg-info
+.eggs
+build/
+dist/
 
 # OS
 .DS_Store
@@ -43,10 +49,24 @@ Thumbs.db
 .idea
 *.swp
 *.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local
 
 # Project specific
 infra/
 docs/
 tests/
+monitoring/data
+db/data
+Makefile
+README*
+*.md
+LICENSE
+GUARDRAILS.md
+INFRA_CICD_REVIEW.md
 *.md
 .env.example

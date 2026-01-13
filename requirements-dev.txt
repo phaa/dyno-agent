@@ -1,3 +1,4 @@
+# Dependencies needed when testing outside containers
 pytest
 pytest-asyncio
 pytest-cov

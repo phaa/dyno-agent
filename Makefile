@@ -1,6 +1,6 @@
 # Dyno-Agent Makefile with Monitoring
 
-.PHONY: help run stop build clean test migrate seed monitoring
+.PHONY: help run stop build clean test migrate seed monitoring validate ready
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -76,3 +76,23 @@ infra-apply:
 
 infra-destroy:
 	cd infra && terraform destroy
+
+validate: ## Validate service health (FastAPI, Prometheus, Grafana)
+	@echo "🔍 Validating service health..."
+	@docker-compose exec -T fastapi curl -f http://localhost:8000/health > /dev/null 2>&1 && \
+		echo "✅ FastAPI is healthy" || echo "❌ FastAPI is not healthy"
+	@docker-compose exec -T prometheus curl -f http://localhost:9090/-/healthy > /dev/null 2>&1 && \
+		echo "✅ Prometheus is healthy" || echo "❌ Prometheus is not healthy"
+	@docker-compose exec -T grafana curl -f http://localhost:3000/api/health > /dev/null 2>&1 && \
+		echo "✅ Grafana is healthy" || echo "❌ Grafana is not healthy"
+	@echo "✅ All services validated!"
+
+ready: build run migrate seed validate ## Complete setup: build → run → migrate → seed → validate
+	@echo "🚀 All services are ready and validated!"
+	@echo ""
+	@echo "📊 Dashboards:"
+	@echo "  - Grafana: http://localhost:3000 (admin/admin)"
+	@echo "  - Prometheus: http://localhost:9090"
+	@echo "  - API: http://localhost:8000"
+	@echo ""
+	@echo "Next: make logs-app  # to see application logs"

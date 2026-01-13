@@ -8,3 +8,8 @@ db_password  = "dyno_pass"
 huggingface_token = ""
 gemini_api_key    = ""
 jwt_secret        = ""
+
+# Backup Configuration
+backup_retention_days = 7  # Increase to 30 for production
+backup_window         = "03:00-04:00"
+maintenance_window    = "sun:04:00-sun:05:00"

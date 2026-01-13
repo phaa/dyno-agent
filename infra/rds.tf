@@ -18,6 +18,11 @@ resource "aws_db_instance" "postgres" {
   skip_final_snapshot = true
   deletion_protection = false
 
+  # Automated backups configuration
+  backup_retention_period = var.backup_retention_days
+  backup_window           = var.backup_window
+  maintenance_window      = var.maintenance_window
+
   tags = {
     Name = "${var.project_name}-database"
   }

@@ -38,3 +38,21 @@ variable "jwt_secret" {
   sensitive   = true
   default     = "change-me-in-production"
 }
+
+variable "backup_retention_days" {
+  description = "Number of days to retain database backups (7 for dev, 30 for production)"
+  type        = number
+  default     = 7
+}
+
+variable "backup_window" {
+  description = "Preferred backup window (UTC). Format: HH:MM-HH:MM"
+  type        = string
+  default     = "03:00-04:00"
+}
+
+variable "maintenance_window" {
+  description = "Preferred maintenance window (UTC). Format: ddd:HH:MM-ddd:HH:MM"
+  type        = string
+  default     = "sun:04:00-sun:05:00"
+}
