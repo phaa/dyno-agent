@@ -148,7 +148,7 @@ class ConversationService:
             select(Message)
             .where(Message.conversation_id == conversation_id)
             .order_by(
-                Message.created_at.asc(),
+                Message.timestamp.asc(),
                 Message.id.asc(),
             )
             .limit(limit)

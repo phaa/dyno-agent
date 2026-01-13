@@ -97,6 +97,7 @@ This document is the entry point for the system. You can read more detailed topi
 | **[CI/CD Pipeline](docs/CICD.md)** | Deployment automation and development workflow |
 | **[Infrastructure Guide](docs/INFRASTRUCTURE.md)** | AWS deployment, Terraform configuration, and DevOps practices |
 | **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** | Common issues, debugging tips, and maintenance procedures |
+| **[Testing Guide](docs/TESTING.md)** | Test suite instructions, shared fixtures, and Postgres guidance |
 
 
 ### Observability
@@ -212,6 +213,34 @@ make seed
 make grafana-url    # http://localhost:3000 (admin/admin)
 make prometheus-url # http://localhost:9090
 ```
+
+## Testing
+
+This repository maintains a structured test suite covering unit, integration, agent (LangGraph) workflows, end-to-end flows, and performance/load tests. Local runs favor lightweight fakes and in-memory databases for speed; Postgres-backed integration tests are available for PG-specific behavior (see `docs/TESTING.md`).
+
+Basic test commands:
+
+```bash
+# Run the full test suite (defaults to fast, in-memory mode with fakes)
+pytest -q
+
+# Run a single test file
+pytest -q path/to/test_file.py
+
+# Run a single test by node
+pytest -q path/to/test_file.py::test_name -k test_name -s
+
+# Run integration tests (folder)
+pytest -q tests/integration
+
+# Run Postgres-backed integration tests (start DB first via docker-compose)
+docker-compose up -d db
+pytest -q tests/integration --maxfail=1
+docker-compose down
+```
+
+See `docs/TESTING.md` for fixture details, agent fakes, and CI recommendations.
+
 
 #### Local Development Commands
 ```bash
@@ -478,22 +507,40 @@ make prometheus-url # http://localhost:9090
 
 ## Future Enhancements
 
+### Completed Features ✅
+- [x] **Comprehensive Test Suite**: Unit tests, agent workflow tests, integration tests with conftest fixtures
+- [x] **Advanced Monitoring**: CloudWatch dashboards, Prometheus metrics, Grafana dashboards
+- [x] **HTTPS/SSL**: Certificate management in AWS infrastructure setup
+- [x] **LangGraph Agent System**: Multi-tool orchestration with 9 specialized tools
+- [x] **PostgreSQL Integration**: Database models, migrations with Alembic, relational schema
+- [x] **Authentication System**: JWT-based auth with bcrypt password hashing
+- [x] **Real-time Streaming**: SSE streaming responses for chat endpoint
+- [x] **Conversation Persistence**: PostgreSQL checkpointer for state management
+- [x] **Concurrency Control**: Row-level locking with SELECT FOR UPDATE
+- [x] **Infrastructure as Code**: Terraform configuration for AWS deployment
+- [x] **CI/CD Pipeline**: GitHub Actions setup for automated deployment
+- [x] **Business Metrics System**: ROI tracking, time savings, cost analysis
+- [x] **AI Observability**: LangSmith integration for conversation analytics
+- [x] **ECS Fargate Deployment**: Containerized application on AWS
+
 ### Planned Features
 - [ ] **Frontend Interface**: React/Vue.js web interface for non-technical users
 - [ ] **Advanced RAG System**: FAISS vector store for technical documentation search
-- [ ] **Comprehensive Test Suite**: Integration tests, load testing, coverage reporting
 - [ ] **ECS Auto-scaling**: Dynamic scaling based on CPU/memory usage
 - [ ] **RDS High Availability**: Multi-AZ deployment with automated backups
-- [ ] **HTTPS/SSL**: Certificate management and secure connections
-- [ ] **Advanced Monitoring**: CloudWatch dashboards and alerting
 - [ ] **Blue-Green Deployment**: Zero-downtime deployment strategy
 - [ ] **Predictive Analytics**: ML models for demand forecasting
 - [ ] **Mobile App**: React Native interface for field engineers
 - [ ] **Integration APIs**: Connect with Ford's existing ERP systems
 - [ ] **Multi-tenant**: Support for multiple proving grounds
 
+### Guardrails & Safety 🛡️
+- [ ] **Cost & Resource Control**: Token budgets, rate limiting, and execution timeouts to prevent abuse and cost overruns
+- [ ] **Input/Output Safety**: Schema validation, LLM response filtering, and tool call whitelisting
+- [ ] **Access Control & Audit**: Role-based access control (RBAC) with comprehensive audit logging and anomaly detection
+- [ ] **Compliance & Security**: Request signing, HIPAA/SOC2 audit trails, and agent loop protection
+
 ### Technical Debt
-- [ ] **Comprehensive test coverage**: Integration tests, load testing, coverage reporting
 - [ ] **WebSocket support**: Real-time updates for allocation changes
 - [ ] **Advanced caching layer**: Redis for performance optimization
 

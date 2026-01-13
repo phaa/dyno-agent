@@ -64,7 +64,6 @@ async def build_graph(checkpointer: AsyncPostgresSaver = None) -> StateGraph:
     builder.add_node("db_disabled", db_disabled_node) # Node for handling empty/unreachable DB
     builder.add_node("llm", llm_node) # Node for LLM reasoning with tool bindings
     builder.add_node("tools", tool_node) # Node for tool execution with retry logic
-    builder.add_node("retry_tools", tool_node) # Retry node (same logic, different context)
     builder.add_node("error_handler", graceful_error_handler) # Node for graceful error handling
 
     # ---- Entry Point ----
@@ -73,10 +72,10 @@ async def build_graph(checkpointer: AsyncPostgresSaver = None) -> StateGraph:
     # ---- Conditional Edges ----
     builder.add_conditional_edges("check_db", check_db) # summarize or db_disabled based on DB availability
     builder.add_edge("summarize", "llm")
-    builder.add_conditional_edges("llm", route_from_llm)  # tools, retry_tools, error_handler, get_schema, or END
+    builder.add_conditional_edges("llm", route_from_llm)  # tools, error_handler, get_schema, or END
     builder.add_edge("get_schema", "tools") # after schema fetch, execute tools
     builder.add_edge("tools", "summarize") # summarize tools output and return to LLM
-    builder.add_edge("retry_tools", "summarize") # retry also returns to summarize
+
     builder.add_edge("error_handler", "summarize") # error handler returns to conversation flow
     
     # Enhanced flow: summarize → llm → (error handling/retry logic) → tools → summarize

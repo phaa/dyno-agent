@@ -10,23 +10,23 @@ def route_from_llm(state: GraphState):
     """Routing with error handling after LLM processing.
     
     **Routing Logic**:
-    - **Error State**: Routes to retry or error handler based on retry_count
+    - **Error State**: Routes to error handler based on retry_count
     - **Tool Calls**: Routes to schema loading or direct tool execution
     - **No Tools**: Ends conversation normally
     
     **Error Handling**:
-    - retry_count > 0: Routes to retry mechanism
+    - retry_count > 0: Routes back to tools for retry
     - retry_count = 0: Routes to graceful error handler
     - No error: Normal tool/schema routing
     
     Returns:
-        str: Next node name ('retry_tools', 'error_handler', 'get_schema', 'tools', or END)
+        str: Next node name ('error_handler', 'get_schema', 'tools', or END)
     """
     # Check for error state first
     if state.get("error"):
         if state.get("retry_count", 0) > 0:
             logger.info(f"Retrying after error: {state.get('error')} (attempts left: {state.get('retry_count')})")
-            return "retry_tools"
+            return "tools"  # Retry using same tools node
         else:
             logger.error(f"Max retries exhausted for error: {state.get('error')}")
             return "error_handler"
