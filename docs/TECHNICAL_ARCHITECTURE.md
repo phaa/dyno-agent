@@ -183,7 +183,391 @@ def graceful_error_handler(state: GraphState) -> GraphState:
 
 </details>
 
+### Transactional Retry System with Exponential Backoff
+
+**Critical Innovation**: Implemented a unified, reusable retry system for async operations across services and routers using the `@async_retry` decorator. This provides production-grade resilience at the service layer, complementing the agent-level retry logic.
+
+#### Problem Statement
+
+**Challenge**: Database operations, service calls, and HTTP requests encounter transient failures that should be retried automatically. Without a unified system:
+
+- **Inconsistent Handling**: Different services implement retry logic differently
+- **Code Duplication**: Each service re-implements exponential backoff logic
+- **Error Classification**: No consistent way to distinguish retryable vs permanent errors
+- **Monitoring Difficulty**: Retry attempts scattered across codebase, hard to track
+
+#### Architecture: Layered Retry Strategy
+
+```
+User Request
+    ↓
+HTTP Router (chat.py)
+    ↓
+Service Layer (ConversationService)
+    ├─ @async_retry decorator (transactional operations)
+    └─ catch RetryableError / NonRetryableError
+    ↓
+Database/External Service
+    ↓
+Response with automatic fallback on transient failures
+```
+
+**Two-Level Retry Strategy**:
+1. **Service-Level**: `@async_retry` for database and API operations (0-3 retries with backoff)
+2. **Agent-Level**: `retry_count` in LangGraph state (0-2 retries for tool execution)
+
+#### The `@async_retry` Decorator
+
+<details>
+<summary>Implementation: core/retry.py</summary>
+
+```python
+def async_retry(
+    max_attempts: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 10.0
+) -> Callable[[F], F]:
+    """
+    Production-grade decorator for async functions with exponential backoff retry logic.
+    
+    **Why This Pattern**:
+    - Non-invasive: Decorates existing functions without modifying business logic
+    - Flexible: Configurable per use case (fast-fail vs resilient operations)
+    - Type-safe: Uses TypeVar for proper typing
+    - Observable: Comprehensive logging at each retry stage
+    - Reversible: Can be removed/adjusted without changing decorated function
+    
+    **Exception Classification**:
+    - NonRetryableError: Permanent failures (auth, validation) → fail immediately
+    - RetryableError: Transient failures (DB timeout, network) → retry with backoff
+    - SQLAlchemyError: Database errors → classified as retryable
+    - asyncio.TimeoutError: Network timeouts → classified as retryable
+    - Unknown exceptions: Default to retryable with logging
+    
+    **Exponential Backoff Algorithm**:
+    - Formula: delay = min(base_delay * (2 ^ attempt), max_delay)
+    - Prevents thundering herd when service is recovering
+    - Default: 1s → 2s → 4s (capped at 10s)
+    - Highly configurable for different scenarios
+    
+    **Example Usage**:
+    
+    # Resilient database operation
+    @async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
+    async def get_or_create_conversation(self, user_email: str):
+        try:
+            return await self.db.get(User, user_email)
+        except SQLAlchemyError as e:
+            raise RetryableError(f"Database error: {str(e)}") from e
+        except ValueError as e:
+            raise NonRetryableError(f"Invalid input: {str(e)}") from e
+    
+    # Fast-fail critical path
+    @async_retry(max_attempts=2, base_delay=0.1, max_delay=1.0)
+    async def authenticate_user(self, token: str):
+        try:
+            return await verify_token(token)
+        except AuthError as e:
+            raise NonRetryableError(str(e)) from e
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            last_exception = None
+            
+            for attempt in range(max_attempts):
+                try:
+                    return await func(*args, **kwargs)
+                
+                except NonRetryableError:
+                    # Permanent errors fail immediately
+                    logger.debug(f"Non-retryable error in {func.__name__}: {str(e)}")
+                    raise
+                
+                except (RetryableError, SQLAlchemyError, asyncio.TimeoutError) as e:
+                    last_exception = e
+                    if attempt < max_attempts - 1:
+                        # Calculate delay with exponential backoff
+                        delay = min(base_delay * (2 ** attempt), max_delay)
+                        logger.warning(
+                            f"Retry attempt {attempt + 1}/{max_attempts} for {func.__name__}. "
+                            f"Error: {type(e).__name__}: {str(e)}. Waiting {delay:.2f}s..."
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.error(
+                            f"All {max_attempts} attempts failed for {func.__name__}. "
+                            f"Final error: {type(e).__name__}: {str(e)}"
+                        )
+                
+                except Exception as e:
+                    # Unexpected errors also retry once
+                    last_exception = e
+                    if attempt < max_attempts - 1:
+                        delay = min(base_delay * (2 ** attempt), max_delay)
+                        logger.warning(
+                            f"Unexpected error in {func.__name__} "
+                            f"(attempt {attempt + 1}/{max_attempts}): {str(e)}. "
+                            f"Waiting {delay:.2f}s..."
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.error(
+                            f"Permanent failure in {func.__name__}: {type(e).__name__}: {str(e)}"
+                        )
+            
+            # All retries exhausted
+            raise last_exception if last_exception else Exception("Retry failed")
+        
+        return wrapper
+    return decorator
+```
+
+</details>
+
+#### Exception Classification System
+
+<details>
+<summary>RetryableError vs NonRetryableError</summary>
+
+```python
+# Located in: core/retry.py
+
+class RetryableError(Exception):
+    """
+    Exception that should be retried with exponential backoff.
+    
+    Used for transient, temporary failures that may succeed on retry:
+    - Database connection timeouts and temporary unavailability
+    - Network timeouts and intermittent connectivity issues
+    - Rate limit errors (API service recovering)
+    - Temporary resource exhaustion (connection pool saturation)
+    - Service restarts and rolling deployments
+    
+    **Production Pattern**:
+    except SQLAlchemyError as e:
+        if is_connection_error(e):
+            raise RetryableError(f"Database connection failed: {str(e)}") from e
+    """
+    pass
+
+class NonRetryableError(Exception):
+    """
+    Exception that should NOT be retried.
+    
+    Used for permanent, deterministic failures that won't change on retry:
+    - Authentication and authorization failures (wrong credentials)
+    - User not found in database (400/404 errors)
+    - Validation errors (malformed input, business rule violations)
+    - Resource access denied (403 forbidden)
+    - Configuration errors (missing required settings)
+    
+    **Production Pattern**:
+    except ValueError as e:
+        raise NonRetryableError(f"Invalid user input: {str(e)}") from e
+    """
+    pass
+```
+
+</details>
+
+#### Real-World Service Integration
+
+<details>
+<summary>ConversationService: Decorated Methods</summary>
+
+```python
+class ConversationService:
+    """Service with automatic retry on all database operations."""
+    
+    @async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
+    async def get_or_create_conversation(self, user_email: str, conversation_id: str = None):
+        """
+        Gets or creates a conversation with automatic retry.
+        
+        **Retry Behavior**:
+        - 3 total attempts
+        - 0.5s → 1s → 2s backoff
+        - Fails immediately on auth errors (NonRetryableError)
+        - Retries on DB connection issues (RetryableError)
+        
+        **Error Classification in Implementation**:
+        - User not found → NonRetryableError (400 Bad Request)
+        - Access denied → NonRetryableError (403 Forbidden)
+        - DB connection error → RetryableError (auto-retried)
+        """
+        try:
+            user = await self.db.get(User, user_email)
+            if not user:
+                raise NonRetryableError(f"User {user_email} not found")
+            
+            if conversation_id:
+                conv = await self.db.get(Conversation, conversation_id)
+                if not conv or conv.user_email != user_email:
+                    raise NonRetryableError("Not authorized to access conversation")
+                return conv
+            
+            # Create new conversation
+            conv = Conversation(id=str(uuid.uuid4()), user_email=user_email)
+            self.db.add(conv)
+            await self.db.flush()
+            await self.db.commit()
+            return conv
+            
+        except (NonRetryableError, RetryableError):
+            raise
+        except SQLAlchemyError as e:
+            await self.db.rollback()
+            raise RetryableError(f"Database error: {str(e)}") from e
+    
+    @async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
+    async def save_message(self, conversation_id: str, role: str, content: str):
+        """
+        Saves message to database with automatic retry on transient failures.
+        
+        **Design Decision**: Message save doesn't fail the entire chat streaming.
+        If retry exhausted, streaming continues without persisting that message,
+        but error is logged for monitoring.
+        """
+        message = Message(conversation_id=conversation_id, role=role, content=content)
+        self.db.add(message)
+        
+        try:
+            await self.db.flush()
+            await self.db.commit()
+        except SQLAlchemyError as e:
+            await self.db.rollback()
+            raise RetryableError(f"Failed to save message: {str(e)}") from e
+```
+
+</details>
+
+#### Router Integration Pattern
+
+<details>
+<summary>Chat Router: Handling Service Retry Exceptions</summary>
+
+```python
+@router.post("/stream")
+async def chat_stream(
+    chat_request: ChatRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+) -> StreamingResponse:
+    """
+    Chat endpoint with unified retry handling.
+    
+    **Error Handling Flow**:
+    1. Service method is called (decorated with @async_retry)
+    2. Automatic retry occurs in background (0-3 attempts)
+    3. If retries exhausted:
+       - NonRetryableError → HTTP 400 (client error)
+       - RetryableError → HTTP 500 (server error, client can retry)
+    """
+    user_email = get_user_email_from_token(request)
+    conv_service = ConversationService(db=db)
+    
+    try:
+        # Method automatically retries on transient failures
+        conversation = await conv_service.get_or_create_conversation(
+            user_email=user_email,
+            conversation_id=chat_request.conversation_id
+        )
+    except NonRetryableError as e:
+        # User/auth error - fail immediately with 400
+        logger.error(f"Non-retryable error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to create conversation: {str(e)}")
+    except Exception as e:
+        # Retries exhausted - fail with 500
+        logger.error(f"Failed after retries: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to initialize chat session")
+    
+    async def event_generator():
+        # ... streaming logic ...
+        try:
+            await conv_service.save_message(conversation_id, role, content)
+        except RetryableError as e:
+            # Log but continue streaming - message persistence is not critical
+            logger.warning(f"Failed to persist message (will retry): {str(e)}")
+```
+
+</details>
+
+#### Monitoring & Observability
+
+**Retry Logging Strategy**:
+
+```
+INFO: Normal operation (no retry needed)
+
+WARNING: Retry attempt 1/3 for get_or_create_conversation. 
+  Error: SQLAlchemyError: connection pool timeout. Waiting 0.50s...
+
+WARNING: Retry attempt 2/3 for get_or_create_conversation.
+  Error: SQLAlchemyError: connection pool timeout. Waiting 1.00s...
+
+ERROR: All 3 attempts failed for get_or_create_conversation.
+  Final error: SQLAlchemyError: connection pool timeout.
+```
+
+**Metrics Extracted**:
+- Retry attempts per function
+- Success rate after N retries
+- Backoff delay effectiveness
+- Classification breakdown (retryable vs non-retryable)
+
+#### Production Configuration
+
+<details>
+<summary>Tuning for Different Scenarios</summary>
+
+```python
+# Database operations - tolerant to temporary failures
+@async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
+async def database_operation():
+    """Transient DB failures are common during deployments/maintenance"""
+    pass
+
+# API calls - more aggressive backoff
+@async_retry(max_attempts=4, base_delay=1.0, max_delay=15.0)
+async def external_api_call():
+    """External services may have longer recovery times"""
+    pass
+
+# Critical path - fail fast
+@async_retry(max_attempts=2, base_delay=0.1, max_delay=1.0)
+async def authentication():
+    """Auth failures are usually permanent - fail fast"""
+    pass
+
+# Cache operations - always succeed
+@async_retry(max_attempts=1)  # Optional: might not retry at all
+async def cache_get():
+    """Cache misses are not errors"""
+    pass
+```
+
+</details>
+
+#### Comparison: Service-Level vs Agent-Level Retries
+
+| Aspect | Service-Level (`@async_retry`) | Agent-Level (`retry_count`) |
+|--------|--------------------------------|--------------------------|
+| **Scope** | Single operation (DB, API) | Tool execution flow |
+| **Trigger** | Transient errors | Tool errors within graph |
+| **Time Scale** | 0-5 seconds | Minutes (multi-turn) |
+| **State Mgmt** | Automatic in decorator | Manual via state |
+| **Best For** | Infrastructure failures | Tool logic errors |
+| **Caller** | Service consumers | LangGraph nodes |
+
+**Complementary Design**: Both levels work together:
+- Service retry handles infrastructure blips
+- Agent retry handles tool logic issues
+- Combined: System resilient to both types of failures
+
 ### Why LangGraph Over LangChain Expression Language?
+
+
 
 **Strategic Decision**: Chose LangGraph over simpler LangChain LCEL because vehicle allocation requires **complex conditional logic** and **state management** that basic chains cannot handle.
 

@@ -7,18 +7,18 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.graph import build_graph
-from models.user import User
 from services.conversation_service import ConversationService
 from auth.auth_bearer import JWTBearer
 from auth.auth_handler import get_user_email_from_token
 from core.db import get_db
 from core.metrics import track_performance
 from core.conversation_metrics import ConversationMetrics
+from core.retry import RetryableError, NonRetryableError
 from schemas.chat import ChatRequest
+from middleware.rate_limit import limiter
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("langchain").setLevel(logging.DEBUG)
@@ -38,6 +38,7 @@ def get_checkpointer(request: Request):
 
 
 @router.post("/stream", dependencies=[Depends(JWTBearer())], tags=["chat"])
+@limiter.limit("20/minute") # 20 requests per minute per user
 @track_performance(service_name="ChatService", include_metadata=True)
 async def chat_stream(
     chat_request: ChatRequest,
@@ -54,45 +55,61 @@ async def chat_stream(
     """
 
     user_email = get_user_email_from_token(request)
-
-    existing_user = (
-        await db.execute(select(User).where(User.email == user_email))
-    ).scalar_one_or_none()
-
-    if not existing_user:
-        raise HTTPException(status_code=400, detail="User don't exist.")
-    
     user_message: str = chat_request.message
     conv_id: str | None = chat_request.conversation_id
+
+    # Get or create conversation (with automatic retry via service)
+    conv_service = ConversationService(db=db)
+
+    try:
+        conversation = await conv_service.get_or_create_conversation(
+            user_email=user_email,
+            conversation_id=conv_id
+        )
+    except NonRetryableError as e:
+        logger.error(f"Non-retryable error creating conversation: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to create conversation: {str(e)}")
+    except Exception as e:
+        logger.error(f"Failed to create conversation after all retries: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to initialize chat session")
+
+    if not conversation.user:
+        error_msg = f"User {user_email} not found in conversation"
+        logger.error(error_msg)
+        raise HTTPException(status_code=400, detail="User doesn't exist.")
 
     async def event_generator() -> AsyncGenerator[str, None]:
         start_time = time.time()
         last_ai_message_id: str | None = None
         final_assistant_response: str | None = None
-        conversation = None
-        conv_service = None
         
         try:
-            # Initialize services
-            graph = await build_graph(checkpointer)
-            conv_service = ConversationService(db=db)
+            logger.info(f"Starting chat stream for user {user_email}, conversation {conversation.id}")
             
-            # Get or create conversation
-            conversation = await conv_service.get_or_create_conversation(
-                user_email=user_email,
-                conversation_id=conv_id
-            )
-
-            # Save user message
-            await conv_service.save_message(
-                conversation_id=conversation.id,
-                role="user",
-                content=user_message
-            )
+            # Initialize services with error handling
+            try:
+                graph = await build_graph(checkpointer)
+            except Exception as e:
+                logger.error(f"Failed to build graph: {str(e)}")
+                error_payload = json.dumps({"type": "error", "content": "Failed to initialize AI engine"})
+                yield f"data: {error_payload}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            
+            # Save user message with error handling
+            try:
+                await conv_service.save_message(
+                    conversation_id=conversation.id,
+                    role="user",
+                    content=user_message
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save user message: {str(e)}")
+                # Continua mesmo se falhar, mas loga para auditoria
 
             inputs = {
                 "messages": [HumanMessage(content=user_message)],
-                "user_name": existing_user.fullname.split(" ")[0],
+                "user_name": conversation.user.fullname.split(" ")[0],
                 "conversation_id": conversation.id,
             }
 
@@ -187,19 +204,28 @@ async def chat_stream(
                         yield f"data: {payload}\n\n"
                         
                 except Exception as chunk_error:
-                    # Log chunk processing error but continue streaming
+                    # Log chunk processing error with full context
+                    logger.error(
+                        f"Error processing stream chunk: {str(chunk_error)}",
+                        exc_info=True
+                    )
                     error_payload = json.dumps({
                         "type": "error",
-                        "content": "Erro processando resposta"
+                        "content": "Erro ao processar resposta. Tente novamente."
                     })
                     yield f"data: {error_payload}\n\n"
                     continue
 
         except Exception as e:
-            # Handle major errors
+            # Handle major errors with logging
+            logger.error(
+                f"Critical error in chat stream: {str(e)}",
+                exc_info=True,
+                extra={"user_email": user_email, "conversation_id": conversation.id}
+            )
             error_payload = json.dumps({
                 "type": "error",
-                "content": f"Erro interno: {str(e)}"
+                "content": "Erro ao processar sua solicitação. Nossa equipe foi notificada."
             })
             yield f"data: {error_payload}\n\n"
             
@@ -219,8 +245,17 @@ async def chat_stream(
                     )
             except Exception as e:
                 # Log metrics errors but continue
-                logger.error(f"Failed to track conversation metrics: {str(e)}")
-                pass
+                logger.error(
+                    f"Failed to track conversation metrics: {str(e)}",
+                    exc_info=False
+                )
+            
+            # Log completion
+            duration_ms = (time.time() - start_time) * 1000
+            logger.info(
+                f"Chat stream completed for user {user_email}",
+                extra={"duration_ms": duration_ms, "conversation_id": conversation.id}
+            )
             
             # Always end the stream
             yield "data: [DONE]\n\n"

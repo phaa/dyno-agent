@@ -89,6 +89,119 @@ def test_my_graph(install_langgraph_fakes, install_agents_nodes):
 
 These fixtures reduce duplication and help keep agent tests deterministic.
 
+## Testing Retry System
+
+The retry system (`core/retry.py`) is comprehensively tested to ensure production-grade resilience:
+
+### Retry Decorator Tests (`test_retry_system.py`)
+
+Tests for the `@async_retry` decorator cover:
+
+- **Basic Functionality**:
+  - Success on first attempt (no retry)
+  - Automatic retry on transient failures
+  - Exception classification (retryable vs non-retryable)
+  - Immediate failure on non-retryable errors
+  - Exponential backoff timing validation
+  - Backoff capping at `max_delay`
+
+- **Exception Handling**:
+  - `RetryableError`: Triggers retry with backoff
+  - `NonRetryableError`: Fails immediately without retry
+  - `SQLAlchemyError`: Automatically treated as retryable
+  - `asyncio.TimeoutError`: Automatically treated as retryable
+  - Unknown exceptions: Treated as retryable with logging
+
+- **Observability**:
+  - Retry attempts are logged as warnings
+  - Exhausted retries logged as errors
+  - Exception chains preserved for debugging
+
+Run retry decorator tests:
+
+```bash
+pytest -q tests/test_retry_system.py
+```
+
+### Service Integration Tests (`test_conversation_service_retry.py`)
+
+Tests for retry behavior in `ConversationService`:
+
+- **Database Retry**:
+  - Retry on connection timeouts and pool exhaustion
+  - Success after transient failures
+  - Immediate failure on validation errors (non-retryable)
+  - Rollback on all retry attempts
+
+- **Authorization Tests**:
+  - User not found → immediate failure (non-retryable)
+  - Access denied → immediate failure (non-retryable)
+
+- **Persistence Tests**:
+  - Message save with automatic retry
+  - Conversation creation and retrieval
+  - Retry exhaustion with appropriate error
+
+- **Error Handling**:
+  - Error messages preserved through retries
+  - Logging of transient failures
+  - Rollback on database errors
+
+Run service retry tests:
+
+```bash
+pytest -q tests/test_conversation_service_retry.py
+```
+
+### Retry Configuration Testing
+
+When testing your own services with `@async_retry`, configure the decorator based on use case:
+
+```python
+# Database operations - tolerant to transient failures
+@async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
+async def get_or_create_conversation(self, user_email: str):
+    try:
+        return await self.db.get(User, user_email)
+    except SQLAlchemyError as e:
+        raise RetryableError(f"Database error: {str(e)}") from e
+    except ValueError as e:
+        raise NonRetryableError(f"Validation error: {str(e)}") from e
+
+# Critical path - fail fast
+@async_retry(max_attempts=2, base_delay=0.1, max_delay=1.0)
+async def authenticate_user(self, token: str):
+    try:
+        return await verify_token(token)
+    except AuthError as e:
+        raise NonRetryableError(str(e)) from e
+```
+
+### Testing Retry Behavior in Custom Code
+
+When testing services with retry decorators, use mocking to simulate transient failures:
+
+```python
+@pytest.mark.asyncio
+async def test_service_retries_on_db_timeout(mock_async_session):
+    db = mock_async_session
+    user = MagicMock(email="user@test.com")
+
+    # First call raises error, second succeeds
+    db.get.side_effect = [
+        SQLAlchemyError("connection timeout"),
+        user
+    ]
+
+    service = MyService(db)
+    result = await service.get_or_create(user_email="user@test.com")
+
+    assert result is not None
+    assert db.get.call_count == 2  # Called twice (first failed, second succeeded)
+```
+
+
+
 ## CI
 
 - The repository includes a basic CI workflow at `.github/workflows/ci.yml`. To run the full test suite in CI consider:

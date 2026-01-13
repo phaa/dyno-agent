@@ -1,16 +1,24 @@
 import uuid
+import logging
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
+
+from models.user import User
 from models.conversation import Conversation, Message
+from core.retry import async_retry, RetryableError, NonRetryableError
+
+logger = logging.getLogger(__name__)
 
 class ConversationService:
     """
     Business logic service for conversation and message management operations.
     
     This service provides core functionality for:
-    - Creating and retrieving user conversations
+    - Creating and retrieving user conversations with automatic retry
     - Managing conversation state and persistence
-    - Storing and retrieving chat messages
+    - Storing and retrieving chat messages with automatic retry
     - Maintaining conversation history with proper ordering
     
     The service is fully isolated from LangChain/LangGraph frameworks,
@@ -18,6 +26,12 @@ class ConversationService:
     
     All database operations use SQLAlchemy 2.0 async patterns with proper
     transaction management and error handling for data consistency.
+    
+    Retry Strategy:
+    - Database operations are automatically retried on transient failures
+    - Exponential backoff: 0.5s → 1s → 2s (max 5s)
+    - Non-retryable errors (404, 403) fail immediately
+    - Retryable errors (connection failures, timeouts) are retried
     """
     def __init__(self, db: AsyncSession):
         """
@@ -29,6 +43,7 @@ class ConversationService:
         """
         self.db = db
 
+    @async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
     async def get_or_create_conversation(self, user_email: str, conversation_id: str = None):
         """
         Retrieves an existing conversation or creates a new one for the user.
@@ -37,12 +52,19 @@ class ConversationService:
         - Returning an existing conversation if valid conversation_id is provided
         - Creating a new conversation with auto-generated UUID if none exists
         
+        Automatically retries on database transient failures with exponential backoff.
+        Non-retryable errors (validation, authorization) fail immediately.
+        
         Args:
             user_email (str): Email address of the user owning the conversation
             conversation_id (str, optional): UUID of existing conversation to retrieve
             
         Returns:
             Conversation: Either the retrieved existing conversation or newly created one
+            
+        Raises:
+            NonRetryableError: User not found or conversation access denied
+            RetryableError: Database connection failures (auto-retried)
             
         Database Operations:
             - Uses get() for efficient primary key lookup
@@ -54,44 +76,69 @@ class ConversationService:
             - Automatic rollback on any database errors
             - Proper exception propagation for error handling
         """
-        if conversation_id:
-            conv = await self.db.get(Conversation, conversation_id)
-            if conv and conv.user_email == user_email:
-                return conv
-            
-        # Create a new conversation
-        conv = Conversation(
-            id=str(uuid.uuid4()),
-            user_email=user_email,
-            title="New Chat"
-        )
-
-        self.db.add(conv)
-
         try:
-            await self.db.flush() # writes to db withou committing
-            #await self.db.refresh(conv)
-            await self.db.commit()
-        except Exception as e:
-            await self.db.rollback()
-            raise
+            user = await self.db.get(User, user_email)
+            if not user:
+                raise NonRetryableError(f"User {user_email} not found")
 
-        return conv
+            if conversation_id:
+                conv = await self.db.get(Conversation, conversation_id)
+                if not conv or conv.user_email != user_email:
+                    raise NonRetryableError(f"Not authorized to access conversation {conversation_id}")
+                return conv
+
+            # Create a new conversation
+            conv = Conversation(
+                id=str(uuid.uuid4()),
+                user_email=user_email,
+                title="New Chat"
+            )
+
+            self.db.add(conv)
+
+            try:
+                await self.db.flush()  # writes to db without committing
+                await self.db.commit()
+            except SQLAlchemyError as e:
+                await self.db.rollback()
+                raise RetryableError(f"Database error creating conversation: {str(e)}") from e
+            except Exception as e:
+                await self.db.rollback()
+                raise
+
+            return conv
+        
+        except (NonRetryableError, RetryableError):
+            # Re-raise our custom exceptions
+            raise
+        except SQLAlchemyError as e:
+            # Convert database errors to retryable
+            raise RetryableError(f"Database error in get_or_create_conversation: {str(e)}") from e
+        except Exception as e:
+            # Log unexpected errors
+            logger.error(f"Unexpected error in get_or_create_conversation: {str(e)}", exc_info=True)
+            raise
     
+    @async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
     async def save_message(self, conversation_id: str, role: str, content: str):
         """
-        Persists a chat message to the database with automatic timestamping.
+        Persists a chat message to the database with automatic timestamping and retry.
         
         Creates and stores a new message record associated with a conversation,
         maintaining the chronological order of the chat history.
         
+        Automatically retries on database transient failures with exponential backoff.
+        
         Args:
             conversation_id (str): UUID of the conversation this message belongs to
-            role (str): Message role ('user', 'assistant', 'system')
+            role (str): Message role ('user', 'assistant', 'system', 'status')
             content (str): The actual message content/text
             
         Returns:
             Message: The created message object with auto-generated ID and timestamp
+            
+        Raises:
+            RetryableError: Database connection failures or timeouts (auto-retried)
             
         Database Operations:
             - Creates Message with foreign key to conversation
@@ -102,23 +149,37 @@ class ConversationService:
             - Automatic rollback on any database errors
             - Proper exception propagation for error handling
         """
-        message = Message(
-            conversation_id=conversation_id,
-            role=role,
-            content=content
-        )
-
-        self.db.add(message)
-
         try:
-            await self.db.flush() # writes to db withou committing
-            #await self.db.refresh(conv)
-            await self.db.commit()
-        except Exception as e:
-            await self.db.rollback()
-            raise
+            message = Message(
+                conversation_id=conversation_id,
+                role=role,
+                content=content
+            )
 
-        return message
+            self.db.add(message)
+
+            try:
+                await self.db.flush()  # writes to db without committing
+                await self.db.commit()
+            except SQLAlchemyError as e:
+                await self.db.rollback()
+                raise RetryableError(f"Database error saving message: {str(e)}") from e
+            except Exception as e:
+                await self.db.rollback()
+                raise
+
+            return message
+        
+        except RetryableError:
+            # Re-raise retry errors
+            raise
+        except SQLAlchemyError as e:
+            # Convert database errors to retryable
+            raise RetryableError(f"Database error in save_message: {str(e)}") from e
+        except Exception as e:
+            # Log unexpected errors
+            logger.error(f"Unexpected error in save_message: {str(e)}", exc_info=True)
+            raise
 
     async def get_conversation_history(self, conversation_id: str, limit: int = 50):
         """
