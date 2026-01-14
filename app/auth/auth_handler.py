@@ -1,7 +1,7 @@
 import os
 import jwt
 import time
-from typing import Dict
+from typing import Dict, List
 from fastapi import HTTPException, Request
 
 JWT_SECRET = os.getenv("JWT_SECRET")
@@ -9,33 +9,44 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
 JWT_EXP_DELTA_SECONDS = os.getenv("JWT_EXP_DELTA_SECONDS")
 
 
-def token_response(token: str):
-    return {
-        "access_token": token
-    }
-
-def sign_jwt(user_id: str) -> Dict[str, str]:
-    """Generate a JWT token for a given user ID."""
+async def create_acess_token(user_id: str, roles: List[str]) -> str:
+    """
+    Create JWT with roles and permissions.
+    
+    Claims include:
+    - sub: user ID (standard JWT)
+    - email: user email
+    - roles: list of role names for client-side caching
+    - session_id: unique for audit logging
+    - iat/exp: standard timing
+    
+    Why am I including roles in JWT?
+    - Reduces database queries (client-side permission check)
+    - Avoids N+1 problem on every request
+    - Trade-off: role changes have ~5 min latency (acceptable)
+    """
     payload = {
+        "sub": user_id,
         "user_id": user_id,
-        "expires": time.time() + int(JWT_EXP_DELTA_SECONDS)
+        "roles": roles,
+        "session_id": f"{user_id}-{int(time.time())}",
+        "iat": int(time.time()),
+        "exp": int(time.time()) + int(JWT_EXP_DELTA_SECONDS)
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    return token_response(token)
+    return token
 
 
 def decode_jwt(token: str) -> dict:
-    """Decode a JWT token and return the payload if valid, else return an empty dict."""
+    """Decode a JWT token and return the payload if valid"""
     try:
+        # As we already use the iat and exp claims, PyJWT will handle expiration validation
         decoded_token = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        if decoded_token["expires"] >= time.time():
-            return decoded_token
-        else:
-            return None
+        return decoded_token
     except jwt.ExpiredSignatureError:
-        return None
+        raise HTTPException(status_code=401, detail="JWT token expired")
     except jwt.InvalidTokenError:
-        return None
+        raise HTTPException(status_code=401, detail="Invalid JWT token")
 
 
 def get_user_email_from_token(request: Request) -> str:

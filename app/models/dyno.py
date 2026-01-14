@@ -1,20 +1,81 @@
-from sqlalchemy import Column, Integer, String, Date, DateTime, Boolean, ForeignKey, ARRAY, func, Index
-from sqlalchemy.orm import relationship
+from __future__ import annotations
+
+from datetime import date
+
+from sqlalchemy import (
+    Integer,
+    String,
+    Date,
+    Boolean,
+    ARRAY,
+    Index,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from core.db import Base
+from .allocation import Allocation
 
 
 class Dyno(Base):
     __tablename__ = "dynos"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False, index=True)
-    supported_weight_classes = Column(ARRAY(String), nullable=False, default=[])
-    supported_drives = Column(ARRAY(String), nullable=False, default=[])
-    supported_test_types = Column(ARRAY(String), nullable=False, default=[])
-    enabled = Column(Boolean, default=True, index=True)
-    available_from = Column(Date, nullable=True)
-    available_to = Column(Date, nullable=True)
-    allocations = relationship("Allocation", back_populates="dyno")
-    
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    name: Mapped[str] = mapped_column(
+        String,
+        unique=True,
+        nullable=False,
+        index=True
+    )
+
+    supported_weight_classes: Mapped[list[str]] = mapped_column(
+        ARRAY(String),
+        nullable=False,
+        default=list
+    )
+
+    supported_drives: Mapped[list[str]] = mapped_column(
+        ARRAY(String),
+        nullable=False,
+        default=list
+    )
+
+    supported_test_types: Mapped[list[str]] = mapped_column(
+        ARRAY(String),
+        nullable=False,
+        default=list
+    )
+
+    enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        index=True
+    )
+
+    available_from: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True
+    )
+
+    available_to: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True
+    )
+
+    allocations: Mapped[list[Allocation]] = relationship(
+        back_populates="dyno",
+        cascade="all, delete-orphan"
+    )
+
     __table_args__ = (
-        Index('idx_dyno_availability', 'enabled', 'available_from', 'available_to'),
+        Index(
+            "idx_dyno_availability",
+            "enabled",
+            "available_from",
+            "available_to",
+        ),
     )

@@ -1,17 +1,69 @@
-from sqlalchemy import Column, Integer, String, Date, DateTime, Boolean, ForeignKey, ARRAY, func, Index
-from sqlalchemy.orm import relationship
+from __future__ import annotations
+
+from sqlalchemy import Integer, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from core.db import Base
+from .allocation import Allocation
+
 
 class Vehicle(Base):
     __tablename__ = "vehicles"
-    id = Column(Integer, primary_key=True, index=True)
-    vin = Column(String, unique=True, nullable=True, index=True)
-    build_id = Column(String, nullable=True)
-    program = Column(String, nullable=True)
-    cert_team = Column(String, nullable=True)
-    weight_lbs = Column(Integer, nullable=True)
-    weight_class = Column(String, nullable=True)  # '<10k' | '>10k'
-    drive_type = Column(String, nullable=True)  # '2WD' | 'AWD' | 'any'
-    engine = Column(String, nullable=True)  # powerpack
-    build_type = Column(String, nullable=True)
-    allocations = relationship("Allocation", back_populates="vehicle")
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    vin: Mapped[str | None] = mapped_column(
+        String,
+        unique=True,
+        index=True,
+        nullable=True
+    )
+
+    build_id: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )
+
+    program: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )
+
+    cert_team: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )
+
+    weight_lbs: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True
+    )
+
+    weight_class: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )  # '<10k' | '>10k'
+
+    drive_type: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )  # '2WD' | 'AWD' | 'any'
+
+    engine: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )  # powerpack
+
+    build_type: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )
+
+    allocations: Mapped[list[Allocation]] = relationship(
+        back_populates="vehicle",
+        cascade="all, delete-orphan"
+    )

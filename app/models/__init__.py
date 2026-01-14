@@ -5,3 +5,4 @@ from .allocation import Allocation
 from .metrics import Metrics
 from .user import User
 from .conversation import Conversation, Message
+from .rbac import Role, Permission, UserRole
