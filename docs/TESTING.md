@@ -1,14 +1,5 @@
 # Testing Guide — Dyno-Agent
 
-        This document describes how to run and reason about the project's automated test suite.
-
-        ## Quick summary
-
-        - Test framework: `pytest` + `pytest-asyncio`
-        - Lightweight local execution: uses `AsyncMock` and fakes for heavy components (for example LangGraph and LangChain)
-        - Real PostgreSQL integration: recommended for tests that exercise array operators and row-level locking
-# Testing Guide — Dyno-Agent
-
 This document describes how to run and reason about the project's automated test suite.
 
 ## Quick summary
@@ -78,13 +69,14 @@ The repository provides common fixtures in `app/tests/conftest.py` to standardiz
 
 ```python
 def test_my_graph(install_langgraph_fakes, install_agents_nodes):
-                fake = install_agents_nodes({
-                                'llm_node': lambda s: {'messages': ['ok']},
-                                'tool_node': lambda s: {'tools': {}}
-                })
-                import importlib
-                importlib.reload(importlib.import_module('agents.graph'))
-                # ... perform assertions
+    fake = install_agents_nodes({
+        'llm_node': lambda s: {'messages': ['ok']},
+        'tool_node': lambda s: {'tools': {}}
+    })
+    
+    import importlib
+    importlib.reload(importlib.import_module('agents.graph'))
+    # ... perform assertions
 ```
 
 These fixtures reduce duplication and help keep agent tests deterministic.

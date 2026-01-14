@@ -216,7 +216,9 @@ make prometheus-url # http://localhost:9090
 
 ## Testing
 
-This repository maintains a structured test suite covering unit, integration, agent (LangGraph) workflows, end-to-end flows, and performance/load tests. Local runs favor lightweight fakes and in-memory databases for speed; Postgres-backed integration tests are available for PG-specific behavior (see `docs/TESTING.md`).
+This repository maintains a structured test suite covering unit, integration, agent (LangGraph) workflows, end-to-end flows, and performance/load tests. Local runs favor lightweight fakes and in-memory databases for speed; Postgres-backed integration tests are available for PG-specific behavior.
+
+**→ See more in [Testing Guide](docs/TESTING.md)**
 
 Basic test commands:
 
@@ -238,8 +240,6 @@ docker-compose up -d db
 pytest -q tests/integration --maxfail=1
 docker-compose down
 ```
-
-See `docs/TESTING.md` for fixture details, agent fakes, and CI recommendations.
 
 
 #### Local Development Commands
@@ -413,36 +413,6 @@ Business impact metrics are projected based on industry benchmarks
 
 ---
 
-## Testing Strategy
-
-Current test suite focuses on critical paths and health checks. Extended integration and load testing are planned as the system scales.
-
-**→ See more in [Troubleshooting Guide](docs/TROUBLESHOOTING.md)**
-
-### Current Test Suite
-```bash
-# Basic unit tests
-make test
-
-# Run tests directly with pytest
-cd app && python -m pytest
-```
-
-### Existing Tests
-- **Health endpoint test**: Basic API health check
-- **Auto-allocation unit test**: Mocked allocation service test
-- **Basic allocator test**: Simple allocation workflow test
-
-### Test Structure
-```
-app/tests/
-├── test_health.py           # Health endpoint test
-├── test_auto_allocate.py    # Unit test with mocks
-└── tests_allocator.py       # Basic allocation test
-```
-
----
-
 ## Monitoring & Observability
 
 Enterprise-grade monitoring stack with Prometheus, Grafana, CloudWatch integration, and comprehensive business intelligence dashboards.
@@ -522,9 +492,10 @@ make prometheus-url # http://localhost:9090
 - [x] **Business Metrics System**: ROI tracking, time savings, cost analysis
 - [x] **AI Observability**: LangSmith integration for conversation analytics
 - [x] **ECS Fargate Deployment**: Containerized application on AWS
-- [x] **Redis Caching**: Comprehensive caching strategy with Redis for reduced latency and resource usage.
+- [x] **Caching Strategy**: primitive cache strategy for nodes retrieval
 
 ### Planned Features
+- [] **Redis Caching**: Comprehensive caching strategy with Redis for reduced latency and resource usage.
 - [ ] **Frontend Interface**: React/Vue.js web interface for non-technical users
 - [ ] **Advanced RAG System**: FAISS vector store for technical documentation search
 - [ ] **ECS Auto-scaling**: Dynamic scaling based on CPU/memory usage

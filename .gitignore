@@ -14,3 +14,5 @@ infra/*.tfstate
 infra/*.tfstate.backup
 
 **/node_modules/
+
+GUARDRAILS.md
