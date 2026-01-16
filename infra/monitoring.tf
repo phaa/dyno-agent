@@ -91,10 +91,29 @@ resource "aws_ecs_task_definition" "prometheus" {
     
     efs_volume_configuration {
       file_system_id     = aws_efs_file_system.monitoring.id
-      access_point_id    = aws_efs_access_point.prometheus.id
       transit_encryption = "ENABLED"
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.prometheus.id
+        iam             = "ENABLED"
+      }
     }
   }
+
+  volume {
+    name = "prometheus-config"
+
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.monitoring.id
+      transit_encryption = "ENABLED"
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.prometheus.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
   
   container_definitions = jsonencode([
     {
@@ -112,6 +131,11 @@ resource "aws_ecs_task_definition" "prometheus" {
         {
           sourceVolume  = "prometheus-data"
           containerPath = "/prometheus"
+        },
+        {
+          sourceVolume  = "prometheus-config"
+          containerPath = "/etc/prometheus"
+          readOnly      = true
         }
       ]
       
@@ -130,7 +154,7 @@ resource "aws_ecs_task_definition" "prometheus" {
         logDriver = "awslogs"
         options = {
           "awslogs-group"         = "/ecs/${var.project_name}-prometheus"
-          "awslogs-region"        = var.aws_region
+          "awslogs-region"        = var.region
           "awslogs-stream-prefix" = "ecs"
         }
       }
@@ -140,11 +164,12 @@ resource "aws_ecs_task_definition" "prometheus" {
 
 # Prometheus ECS service
 resource "aws_ecs_service" "prometheus" {
-  name            = "${var.project_name}-prometheus"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.prometheus.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
+  name             = "${var.project_name}-prometheus"
+  platform_version = "1.4.0"
+  cluster          = aws_ecs_cluster.main.id
+  task_definition  = aws_ecs_task_definition.prometheus.arn
+  desired_count    = 1
+  launch_type      = "FARGATE"
   
   network_configuration {
     subnets          = aws_subnet.private[*].id
@@ -171,7 +196,7 @@ resource "aws_ecs_task_definition" "grafana" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   execution_role_arn       = aws_iam_role.ecs_execution.arn
-  task_role_arn           = aws_iam_role.ecs_task.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn
   
   cpu    = "512"
   memory = "1024"
@@ -181,8 +206,27 @@ resource "aws_ecs_task_definition" "grafana" {
     
     efs_volume_configuration {
       file_system_id     = aws_efs_file_system.monitoring.id
-      access_point_id    = aws_efs_access_point.grafana.id
+      
       transit_encryption = "ENABLED"
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.grafana.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
+  volume {
+    name = "grafana-config"
+
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.monitoring.id
+      transit_encryption = "ENABLED"
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.grafana.id
+        iam             = "ENABLED"
+      }
     }
   }
   
@@ -202,6 +246,11 @@ resource "aws_ecs_task_definition" "grafana" {
         {
           sourceVolume  = "grafana-data"
           containerPath = "/var/lib/grafana"
+        },
+        {
+          sourceVolume  = "grafana-config"
+          containerPath = "/etc/grafana/provisioning"
+          readOnly      = true
         }
       ]
       
@@ -224,7 +273,7 @@ resource "aws_ecs_task_definition" "grafana" {
         logDriver = "awslogs"
         options = {
           "awslogs-group"         = "/ecs/${var.project_name}-grafana"
-          "awslogs-region"        = var.aws_region
+          "awslogs-region"        = var.region
           "awslogs-stream-prefix" = "ecs"
         }
       }
@@ -234,11 +283,12 @@ resource "aws_ecs_task_definition" "grafana" {
 
 # Grafana ECS service
 resource "aws_ecs_service" "grafana" {
-  name            = "${var.project_name}-grafana"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.grafana.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
+  name             = "${var.project_name}-grafana"
+  platform_version = "1.4.0"
+  cluster          = aws_ecs_cluster.main.id
+  task_definition  = aws_ecs_task_definition.grafana.arn
+  desired_count    = 1
+  launch_type      = "FARGATE"
   
   network_configuration {
     subnets          = aws_subnet.private[*].id

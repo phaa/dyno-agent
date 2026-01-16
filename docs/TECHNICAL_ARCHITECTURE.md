@@ -2,7 +2,7 @@
 
 ## Why This Document Exists
 
-**For Recruiters & Technical Leaders**: While you could read the source code directly, this document serves a specific purpose in demonstrating my technical documentation and system design skills:
+**For Recruiters & Technical Leaders**: While you could read the source code directly, this document serves a specific purpose in providing context, rationale, and my architectural insights that aren't immediately apparent from just reading individual files.
 
 ### **Strategic Value**
 - **Architecture Decisions**: Explains *why* certain technical choices were made, not just *what* was implemented
@@ -11,7 +11,7 @@
 - **Production Readiness**: Demonstrates enterprise-grade considerations beyond basic functionality
 - **System Design**: Shows ability to architect complex, multi-component systems
 
-> **Note**: This document is intentionally dense and complements the source code by providing context, rationale, and my architectural insights that aren't immediately apparent from just reading individual files.
+> **Note**: This document is intentionally long and dense, primarily intended for technical users seeking advanced information about the system.
 
 ---
 
@@ -38,11 +38,11 @@ The Dyno-Agent system was architected with **production-grade requirements** fro
 <summary>Exception Classes Implementation</summary>
 
 ```python
-class RetryableException(Exception):
+class RetryableError(Exception):
     """Exception for errors that can be retried (network timeouts, temporary service unavailability)."""
     pass
 
-class FatalException(Exception):
+class NonRetryableError(Exception):
     """Exception for non-recoverable errors (authentication failures, validation errors)."""
     pass
 ```
@@ -50,8 +50,8 @@ class FatalException(Exception):
 </details>
 
 **Error Types**:
-- **RetryableException**: Network timeouts, temporary database unavailability, rate limits
-- **FatalException**: Authentication failures, validation errors, malformed requests
+- **RetryableError**: Network timeouts, temporary database unavailability, rate limits
+- **NonRetryableError**: Authentication failures, validation errors, malformed requests
 - **Unknown Exceptions**: Treated as retryable with comprehensive logging
 
 #### Intelligent Retry Logic
@@ -60,21 +60,27 @@ class FatalException(Exception):
 <summary>Tool Node with Retry Implementation</summary>
 
 ```python
-async def tool_node_with_retry_logic(state: GraphState) -> GraphState:
+# app/agents/nodes/tool_node.py
+async def tool_node(state: GraphState) -> GraphState:
     """
-    Execute tools with intelligent retry and error handling.
+    Tool node with intelligent retry mechanism and error classification.
     
-    **Retry Strategy**:
+    Error Classification Strategy:
+    - RetryableException: Network timeouts, temporary service unavailability, rate limits
+    - FatalException: Authentication failures, validation errors, malformed requests
+    - Unknown Exceptions: Treated as retryable with caution
+    
+    Retry Logic:
     - Decrements retry_count on retryable errors
     - Preserves error context for debugging and user feedback
     - Resets error state on successful execution
     - Routes to graceful error handler when retries exhausted
     
-    **Production Benefits**:
-    - Automatic recovery from transient failures (90% of tool errors)
-    - Fast failure for permanent errors (prevents wasted retries)
-    - Comprehensive error tracking for monitoring and alerting
-    - Maintains conversation flow even during service disruptions
+    Args:
+        state: Current graph state with retry information
+        
+    Returns:
+        GraphState: Updated state with results or error information
     """
     try:
         # Execute tools using base ToolNode
@@ -90,6 +96,7 @@ async def tool_node_with_retry_logic(state: GraphState) -> GraphState:
         
     except RetryableException as e:
         # Retryable error: Decrement retry count and preserve error info
+        logger.warning(f"Retryable error in tools: {str(e)}")
         return {
             "retry_count": max(0, state.get("retry_count", 2) - 1),
             "error": str(e),
@@ -98,11 +105,22 @@ async def tool_node_with_retry_logic(state: GraphState) -> GraphState:
         
     except FatalException as e:
         # Fatal error: Immediate failure without retry
+        logger.error(f"Fatal error in tools: {str(e)}")
         return {
             "retry_count": 0,  # Force immediate error handling
             "error": str(e),
             "error_node": "tools"
         }
+        
+    except Exception as e:
+        # Unknown error: Treat as retryable but log for investigation
+        logger.error(f"Unknown error in tools (treating as retryable): {str(e)}", exc_info=True)
+        return {
+            "retry_count": max(0, state.get("retry_count", 2) - 1),
+            "error": f"Unexpected error: {str(e)}",
+            "error_node": "tools"
+        }
+    
 ```
 
 </details>
@@ -113,21 +131,22 @@ async def tool_node_with_retry_logic(state: GraphState) -> GraphState:
 <summary>GraphState with Error Handling</summary>
 
 ```python
+# app/agents/state.py
 class GraphState(MessagesState):
     """
     Enhanced graph state with comprehensive error handling and retry control.
     
-    **Error Handling Architecture**:
+    Error Handling Architecture:
     - **retry_count**: Remaining retry attempts (default: 2)
     - **error**: Current error message for debugging and user feedback
     - **error_node**: Which node failed (enables targeted retry strategies)
     
-    **Retry Strategy**:
+    Retry Strategy:
     - RetryableException: Decrements retry_count and attempts again
     - FatalException: Immediately fails without retry
     - Zero retry_count: Routes to graceful error handler
     
-    **Production Benefits**:
+    Benefits for Production :
     - Automatic recovery from transient failures (network, timeouts)
     - Fast failure for permanent errors (auth, validation)
     - Comprehensive error tracking for monitoring and debugging
@@ -152,24 +171,34 @@ class GraphState(MessagesState):
 <summary>Error Handler Implementation</summary>
 
 ```python
+# app/agents/nodes/utils.py
 def graceful_error_handler(state: GraphState) -> GraphState:
     """
     Production-grade error handler for exhausted retries and fatal errors.
     
-    **Error Recovery Strategy**:
+    Error Recovery Strategy:
     - Provides user-friendly error message based on error type
     - Clears error state to prevent error propagation
     - Maintains conversation flow with graceful degradation
     - Logs detailed error information for debugging
     
-    **Error Types Handled**:
-    - Network timeouts and service unavailability
-    - Database connection failures
-    - Tool execution failures
-    - LLM API errors and rate limits
+    Args:
+        state: GraphState containing error information
+        
+    Returns:
+        GraphState: Updated state with error message and cleared error fields
     """
     error_msg = state.get("error", "Unknown error occurred")
     error_node = state.get("error_node", "unknown")
+    
+    logger.error(
+        f"Graceful error handling triggered",
+        extra={
+            "error_message": error_msg,
+            "failed_node": error_node,
+            "retry_attempts_made": 2 - state.get("retry_count", 0)
+        }
+    )
     
     user_message = "I encountered an issue processing your request. Please try rephrasing your question."
     
@@ -222,53 +251,42 @@ Response with automatic fallback on transient failures
 <summary>Implementation: core/retry.py</summary>
 
 ```python
+# app/core/retry.py
 def async_retry(
     max_attempts: int = 3,
     base_delay: float = 1.0,
     max_delay: float = 10.0
 ) -> Callable[[F], F]:
-    """
-    Production-grade decorator for async functions with exponential backoff retry logic.
+    """Decorator for async functions with exponential backoff retry logic.
     
-    **Why This Pattern**:
-    - Non-invasive: Decorates existing functions without modifying business logic
-    - Flexible: Configurable per use case (fast-fail vs resilient operations)
-    - Type-safe: Uses TypeVar for proper typing
-    - Observable: Comprehensive logging at each retry stage
-    - Reversible: Can be removed/adjusted without changing decorated function
+    Automatically retries on transient failures with exponential backoff.
+    Distinguishes between retryable and non-retryable errors.
     
-    **Exception Classification**:
-    - NonRetryableError: Permanent failures (auth, validation) → fail immediately
-    - RetryableError: Transient failures (DB timeout, network) → retry with backoff
-    - SQLAlchemyError: Database errors → classified as retryable
-    - asyncio.TimeoutError: Network timeouts → classified as retryable
-    - Unknown exceptions: Default to retryable with logging
+    Args:
+        max_attempts: Maximum number of retry attempts (default: 3)
+        base_delay: Initial delay in seconds between retries (default: 1.0)
+        max_delay: Maximum delay in seconds between retries (default: 10.0)
     
-    **Exponential Backoff Algorithm**:
-    - Formula: delay = min(base_delay * (2 ^ attempt), max_delay)
-    - Prevents thundering herd when service is recovering
-    - Default: 1s → 2s → 4s (capped at 10s)
-    - Highly configurable for different scenarios
+    Returns:
+        Decorated async function with retry logic
     
-    **Example Usage**:
+    Example:
+        @async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
+        async def fetch_data():
+            return await client.get('/data')
     
-    # Resilient database operation
-    @async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
-    async def get_or_create_conversation(self, user_email: str):
-        try:
-            return await self.db.get(User, user_email)
-        except SQLAlchemyError as e:
-            raise RetryableError(f"Database error: {str(e)}") from e
-        except ValueError as e:
-            raise NonRetryableError(f"Invalid input: {str(e)}") from e
+    Error Handling:
+    - RetryableError: Retried up to max_attempts times
+    - NonRetryableError: Raised immediately without retry
+    - SQLAlchemyError: Treated as retryable (database transient failures)
+    - asyncio.TimeoutError: Treated as retryable
+    - Other exceptions: Treated as retryable with logging
     
-    # Fast-fail critical path
-    @async_retry(max_attempts=2, base_delay=0.1, max_delay=1.0)
-    async def authenticate_user(self, token: str):
-        try:
-            return await verify_token(token)
-        except AuthError as e:
-            raise NonRetryableError(str(e)) from e
+    Backoff Strategy:
+    - Uses exponential backoff: delay = base_delay * (2 ^ attempt)
+    - Capped at max_delay to prevent excessive waiting
+    - Logs warning for each retry attempt
+    - Logs error when all retries exhausted
     """
     def decorator(func: Callable) -> Callable:
         @wraps(func)
@@ -280,8 +298,7 @@ def async_retry(
                     return await func(*args, **kwargs)
                 
                 except NonRetryableError:
-                    # Permanent errors fail immediately
-                    logger.debug(f"Non-retryable error in {func.__name__}: {str(e)}")
+                    # Non-retryable errors fail immediately
                     raise
                 
                 except (RetryableError, SQLAlchemyError, asyncio.TimeoutError) as e:
@@ -291,13 +308,13 @@ def async_retry(
                         delay = min(base_delay * (2 ** attempt), max_delay)
                         logger.warning(
                             f"Retry attempt {attempt + 1}/{max_attempts} for {func.__name__}. "
-                            f"Error: {type(e).__name__}: {str(e)}. Waiting {delay:.2f}s..."
+                            f"Error: {str(e)}. Waiting {delay:.2f}s..."
                         )
                         await asyncio.sleep(delay)
                     else:
                         logger.error(
                             f"All {max_attempts} attempts failed for {func.__name__}. "
-                            f"Final error: {type(e).__name__}: {str(e)}"
+                            f"Final error: {str(e)}"
                         )
                 
                 except Exception as e:
@@ -312,15 +329,14 @@ def async_retry(
                         )
                         await asyncio.sleep(delay)
                     else:
-                        logger.error(
-                            f"Permanent failure in {func.__name__}: {type(e).__name__}: {str(e)}"
-                        )
+                        logger.error(f"Permanent failure in {func.__name__}: {str(e)}")
             
-            # All retries exhausted
+            # If we get here, all retries failed
             raise last_exception if last_exception else Exception("Retry failed")
         
         return wrapper
     return decorator
+
 ```
 
 </details>
@@ -331,8 +347,7 @@ def async_retry(
 <summary>RetryableError vs NonRetryableError</summary>
 
 ```python
-# Located in: core/retry.py
-
+# core/retry.py
 class RetryableError(Exception):
     """
     Exception that should be retried with exponential backoff.
@@ -362,7 +377,7 @@ class NonRetryableError(Exception):
     - Resource access denied (403 forbidden)
     - Configuration errors (missing required settings)
     
-    **Production Pattern**:
+    Production Pattern:
     except ValueError as e:
         raise NonRetryableError(f"Invalid user input: {str(e)}") from e
     """
@@ -377,67 +392,213 @@ class NonRetryableError(Exception):
 <summary>ConversationService: Decorated Methods</summary>
 
 ```python
+# app/services/conversation_service.py
 class ConversationService:
-    """Service with automatic retry on all database operations."""
+    """
+    Business logic service for conversation and message management operations.
     
+    This service provides core functionality for:
+    - Creating and retrieving user conversations with automatic retry
+    - Managing conversation state and persistence
+    - Storing and retrieving chat messages with automatic retry
+    - Maintaining conversation history with proper ordering
+    
+    The service is fully isolated from LangChain/LangGraph frameworks,
+    enabling clean unit testing and reusability across different interfaces.
+    
+    All database operations use SQLAlchemy 2.0 async patterns with proper
+    transaction management and error handling for data consistency.
+    
+    Retry Strategy:
+    - Database operations are automatically retried on transient failures
+    - Exponential backoff: 0.5s → 1s → 2s (max 5s)
+    - Non-retryable errors (404, 403) fail immediately
+    - Retryable errors (connection failures, timeouts) are retried
+    """
+    def __init__(self, db: AsyncSession):
+        """
+        Initializes the conversation service with a database session.
+        
+        Args:
+            db (AsyncSession): Active SQLAlchemy async database session
+                              for all database operations
+        """
+        self.db = db
+
     @async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
     async def get_or_create_conversation(self, user_email: str, conversation_id: str = None):
         """
-        Gets or creates a conversation with automatic retry.
+        Retrieves an existing conversation or creates a new one for the user.
         
-        **Retry Behavior**:
-        - 3 total attempts
-        - 0.5s → 1s → 2s backoff
-        - Fails immediately on auth errors (NonRetryableError)
-        - Retries on DB connection issues (RetryableError)
+        This method handles conversation lifecycle management by either:
+        - Returning an existing conversation if valid conversation_id is provided
+        - Creating a new conversation with auto-generated UUID if none exists
         
-        **Error Classification in Implementation**:
-        - User not found → NonRetryableError (400 Bad Request)
-        - Access denied → NonRetryableError (403 Forbidden)
-        - DB connection error → RetryableError (auto-retried)
+        Automatically retries on database transient failures with exponential backoff.
+        Non-retryable errors (validation, authorization) fail immediately.
+        
+        Args:
+            user_email (str): Email address of the user owning the conversation
+            conversation_id (str, optional): UUID of existing conversation to retrieve
+            
+        Returns:
+            Conversation: Either the retrieved existing conversation or newly created one
+            
+        Raises:
+            NonRetryableError: User not found or conversation access denied
+            RetryableError: Database connection failures (auto-retried)
+            
+        Database Operations:
+            - Uses get() for efficient primary key lookup
+            - Validates conversation ownership by user_email
+            - Creates new conversation with UUID4 identifier
+            - Uses flush() + commit() for immediate availability
+            
+        Transaction Safety:
+            - Automatic rollback on any database errors
+            - Proper exception propagation for error handling
         """
         try:
             user = await self.db.get(User, user_email)
             if not user:
                 raise NonRetryableError(f"User {user_email} not found")
-            
+
             if conversation_id:
                 conv = await self.db.get(Conversation, conversation_id)
                 if not conv or conv.user_email != user_email:
-                    raise NonRetryableError("Not authorized to access conversation")
+                    raise NonRetryableError(f"Not authorized to access conversation {conversation_id}")
                 return conv
-            
-            # Create new conversation
-            conv = Conversation(id=str(uuid.uuid4()), user_email=user_email)
+
+            # Create a new conversation
+            conv = Conversation(
+                id=str(uuid.uuid4()),
+                user_email=user_email,
+                title="New Chat"
+            )
+
             self.db.add(conv)
-            await self.db.flush()
-            await self.db.commit()
+
+            try:
+                await self.db.flush()  # writes to db without committing
+                await self.db.commit()
+            except SQLAlchemyError as e:
+                await self.db.rollback()
+                raise RetryableError(f"Database error creating conversation: {str(e)}") from e
+            except Exception as e:
+                await self.db.rollback()
+                raise
+
             return conv
-            
+        
         except (NonRetryableError, RetryableError):
+            # Re-raise our custom exceptions
             raise
         except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise RetryableError(f"Database error: {str(e)}") from e
+            # Convert database errors to retryable
+            raise RetryableError(f"Database error in get_or_create_conversation: {str(e)}") from e
+        except Exception as e:
+            # Log unexpected errors
+            logger.error(f"Unexpected error in get_or_create_conversation: {str(e)}", exc_info=True)
+            raise
     
     @async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
     async def save_message(self, conversation_id: str, role: str, content: str):
         """
-        Saves message to database with automatic retry on transient failures.
+        Persists a chat message to the database with automatic timestamping and retry.
         
-        **Design Decision**: Message save doesn't fail the entire chat streaming.
-        If retry exhausted, streaming continues without persisting that message,
-        but error is logged for monitoring.
+        Creates and stores a new message record associated with a conversation,
+        maintaining the chronological order of the chat history.
+        
+        Automatically retries on database transient failures with exponential backoff.
+        
+        Args:
+            conversation_id (str): UUID of the conversation this message belongs to
+            role (str): Message role ('user', 'assistant', 'system', 'status')
+            content (str): The actual message content/text
+            
+        Returns:
+            Message: The created message object with auto-generated ID and timestamp
+            
+        Raises:
+            RetryableError: Database connection failures or timeouts (auto-retried)
+            
+        Database Operations:
+            - Creates Message with foreign key to conversation
+            - Auto-generates created_at timestamp via model defaults
+            - Uses flush() + commit() for immediate persistence
+            
+        Transaction Safety:
+            - Automatic rollback on any database errors
+            - Proper exception propagation for error handling
         """
-        message = Message(conversation_id=conversation_id, role=role, content=content)
-        self.db.add(message)
-        
         try:
-            await self.db.flush()
-            await self.db.commit()
+            message = Message(
+                conversation_id=conversation_id,
+                role=role,
+                content=content
+            )
+
+            self.db.add(message)
+
+            try:
+                await self.db.flush()  # writes to db without committing
+                await self.db.commit()
+            except SQLAlchemyError as e:
+                await self.db.rollback()
+                raise RetryableError(f"Database error saving message: {str(e)}") from e
+            except Exception as e:
+                await self.db.rollback()
+                raise
+
+            return message
+        
+        except RetryableError:
+            # Re-raise retry errors
+            raise
         except SQLAlchemyError as e:
-            await self.db.rollback()
-            raise RetryableError(f"Failed to save message: {str(e)}") from e
+            # Convert database errors to retryable
+            raise RetryableError(f"Database error in save_message: {str(e)}") from e
+        except Exception as e:
+            # Log unexpected errors
+            logger.error(f"Unexpected error in save_message: {str(e)}", exc_info=True)
+            raise
+
+    async def get_conversation_history(self, conversation_id: str, limit: int = 50):
+        """
+        Retrieves the chronological message history for a conversation.
+        
+        Fetches messages in reverse chronological order (newest first) from the database,
+        then reverses the list to return messages in chronological order (oldest first)
+        for proper conversation flow display.
+        
+        Args:
+            conversation_id (str): UUID of the conversation to retrieve history for
+            limit (int): Maximum number of messages to retrieve (default: 50)
+            
+        Returns:
+            list[Message]: List of message objects ordered chronologically (oldest first)
+            
+        Database Operations:
+            - Filters messages by conversation_id foreign key
+            - Orders by created_at DESC for efficient recent message retrieval
+            - Applies LIMIT for performance with large conversation histories
+            - Reverses result list for chronological display order
+            
+        Note:
+            There's a bug in the current implementation - uses self.session instead of self.db
+        """
+        stmt = (
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(
+                Message.timestamp.asc(),
+                Message.id.asc(),
+            )
+            .limit(limit)
+        )
+
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
 ```
 
 </details>
@@ -467,28 +628,15 @@ async def chat_stream(
     user_email = get_user_email_from_token(request)
     conv_service = ConversationService(db=db)
     
-    try:
-        # Method automatically retries on transient failures
-        conversation = await conv_service.get_or_create_conversation(
-            user_email=user_email,
-            conversation_id=chat_request.conversation_id
-        )
-    except NonRetryableError as e:
-        # User/auth error - fail immediately with 400
-        logger.error(f"Non-retryable error: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Failed to create conversation: {str(e)}")
-    except Exception as e:
-        # Retries exhausted - fail with 500
-        logger.error(f"Failed after retries: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to initialize chat session")
+    conversation = await conv_service.get_or_create_conversation(
+        user_email=user_email,
+        conversation_id=chat_request.conversation_id
+    )
     
     async def event_generator():
-        # ... streaming logic ...
-        try:
+        async for stream_mode, chunk in graph.astream(**stream_args):
+            # ... streaming logic ...
             await conv_service.save_message(conversation_id, role, content)
-        except RetryableError as e:
-            # Log but continue streaming - message persistence is not critical
-            logger.warning(f"Failed to persist message (will retry): {str(e)}")
 ```
 
 </details>
@@ -567,8 +715,6 @@ async def cache_get():
 
 ### Why LangGraph Over LangChain Expression Language?
 
-
-
 **Strategic Decision**: Chose LangGraph over simpler LangChain LCEL because vehicle allocation requires **complex conditional logic** and **state management** that basic chains cannot handle.
 
 **LangGraph Advantages**:
@@ -599,40 +745,34 @@ async def build_graph(checkpointer: AsyncPostgresSaver) -> StateGraph:
     4. Database checkpointer survives application restarts
     """
     builder = StateGraph(GraphState)
-    
-    # Entry point: Database connectivity check
-    builder.add_node("check_db", check_db)
-    
-    # Conditional schema discovery - only when query_database tool is needed
-    builder.add_node("get_schema", get_schema_node)
-    
-    # Conversation summarization for token optimization
-    builder.add_node("summarize", summarization_node)
-    
-    # Fallback for database issues - critical for uptime
-    builder.add_node("db_disabled", db_disabled_node)
-    
-    # Core reasoning with 9 specialized tools
-    builder.add_node("llm", llm_node)
-    
-    # Enhanced error handling and retry mechanisms
-    builder.add_node("retry_tools", tool_node)  # Retry node (same logic, different context)
-    builder.add_node("error_handler", graceful_error_handler)  # Graceful error handling
-    
-    # Tool execution with error handling
-    builder.add_node("tools", tool_node)
-    
-    # Intelligent routing based on system state, tool requirements, and error handling
+
+    # ---- Nodes ----
+    builder.add_node("summarize", summarization_node) # Node to summarize messages
+    builder.add_node("get_schema", get_schema_node) # Node to fetch DB schema dynamically
+    builder.add_node("db_disabled", db_disabled_node) # Node for handling empty/unreachable DB
+    builder.add_node("llm", llm_node) # Node for LLM reasoning with tool bindings
+    builder.add_node("tools", tool_node) # Node for tool execution with retry logic
+    builder.add_node("error_handler", graceful_error_handler) # Node for graceful error handling
+
+    # ---- Entry Point ----
     builder.set_entry_point("check_db")
-    builder.add_conditional_edges("check_db", check_db)  # → summarize or db_disabled
+
+    # ---- Conditional Edges ----
+    builder.add_conditional_edges("check_db", check_db) # summarize or db_disabled based on DB availability
     builder.add_edge("summarize", "llm")
-    builder.add_conditional_edges("llm", route_from_llm)  # → tools, retry_tools, error_handler, get_schema, or END
-    builder.add_edge("get_schema", "tools")  # Schema loaded, proceed to tools
-    builder.add_edge("tools", "summarize")  # Return to conversation loop
-    builder.add_edge("retry_tools", "summarize")  # Retry also returns to summarize
-    builder.add_edge("error_handler", "summarize")  # Error handler returns to conversation flow
+    builder.add_conditional_edges("llm", route_from_llm)  # tools, error_handler, get_schema, or END
+    builder.add_edge("get_schema", "tools") # after schema fetch, execute tools
+    builder.add_edge("tools", "summarize") # summarize tools output and return to LLM
+
+    builder.add_edge("error_handler", "summarize") # error handler returns to conversation flow
     
-    return builder.compile(checkpointer=checkpointer)
+    # Enhanced flow: summarize → llm → (error handling/retry logic) → tools → summarize
+    
+    # ---- Compile Graph ----
+    graph = builder.compile(checkpointer=checkpointer)
+
+    return graph
+    
 ```
 
 </details>
@@ -686,7 +826,7 @@ async def auto_allocate_vehicle(...):
 
 **Challenge**: Long conversations in automotive engineering contexts can span hours and involve complex allocation decisions. Without optimization, this leads to:
 
-- **Context Window Overflow**: LLM token limits exceeded (>4K tokens)
+- **Context Window Overflow**: LLM token limits exceeded
 - **Performance Degradation**: Slow response times due to large message histories
 - **Storage Bloat**: PostgreSQL checkpointer grows unbounded
 - **Cost Escalation**: High token usage increases API costs exponentially
@@ -695,49 +835,48 @@ async def auto_allocate_vehicle(...):
 
 ```mermaid
 flowchart TD
-    A["Tool Execution Completed"] --> B["Summarization Node"]
-    B --> C{"Messages ≥ 6 OR Tokens >1800?"}
+    A["Tool Execution Output"] --> B["Summarization Node"]
+    B --> C{"Context Density<br/>Threshold Exceeded?"}
     
-    C -->|"No"| D["Continue to LLM (no summarization)"]
-    C -->|"Yes"| E["LLM Summarization"]
+    C -->|"No (Skip)"| D["Preserve Full Context"]
+    C -->|"Yes (Trigger)"| E["LLM-Based Context<br/>Compression"]
     
-    E --> F{"Valid JSON schema?"}
-    F -->|"No"| G["Validation Failed Keep Original Messages"]
-    F -->|"Yes"| H["Create conversation summary"]
+    E --> F{"Schema Validation<br/>(Determinism Check)"}
+    F -->|"Invalid"| G["Fail-safe: Rollback to<br/>Original Messages"]
+    F -->|"Valid"| H["State Pruning:<br/>Generate RemoveMessage"]
     
-    H --> I["Checkpointer Replace 50+ messages -> 1"]
+    H --> I["Checkpointer Optimization<br/>(O(n) → O(1) State)"]
     
-    G --> J["Return to LLM Node"]
+    G --> J["LLM Orchestrator Node"]
     I --> J
     D --> J
     
-    J --> K["LLM Processing"]
-    K --> L{"Error State<br/>Check?"}
+    J --> K["Inference Execution"]
+    K --> L{"State Error<br/>Detected?"}
     
-    L -->|"Has Error"| M{"Retry Count<br/>> 0?"}
-    L -->|"No Error"| N{"Tool Calls are required?"}
+    L -->|"Yes"| M{"Retry Budget<br/>Available?"}
+    L -->|"No"| N{"Tool Call<br/>Requested?"}
     
-    M -->|"Yes"| O["Retry Tools Node"]
-    M -->|"No"| P["Graceful Error Handler"]
+    M -->|"Yes"| O["Re-entry: Tool Retry"]
+    M -->|"No"| P["Exception Handler<br/>(Graceful Exit)"]
     
-    N -->|"Yes"| Q{"Query Database<br/>Tool?"}
-    N -->|"No"| R["END Conversation"]
+    N -->|"Yes"| Q{"Data Retrieval<br/>Required?"}
+    N -->|"No"| R["Terminator (END)"]
     
-    Q -->|"Yes"| S["Get Schema Node"]
-    Q -->|"No"| T["Tools Node"]
+    Q -->|"Yes"| S["Metadata/Schema<br/>Lookup"]
+    Q -->|"No"| T["Tool Dispatcher"]
     
     S --> T
     O --> B
     T --> B
     P --> B
     
-    style A fill:#e1f5fe
-    style E fill:#fff3e0
-    style I fill:#e8f5e8
-    style G fill:#ffebee
-    style O fill:#f3e5f5
-    style P fill:#ffebee
-    style S fill:#e0f2f1
+    style A fill:#e1f5fe,stroke:#01579b
+    style E fill:#fff3e0,stroke:#e65100
+    style I fill:#e8f5e8,stroke:#2e7d32
+    style G fill:#ffebee,stroke:#c62828
+    style J fill:#f3e5f5,stroke:#7b1fa2
+    style R fill:#eceff1,stroke:#455a64
 ```
 
 **Enhanced Flow Explanation**:
@@ -767,46 +906,49 @@ flowchart TD
 <summary>Implementation</summary>
 
 ```python
+# app/agents/nodes/summarization_node.py
 async def summarization_node(state: GraphState):
     """
-    Production-grade conversation summarization with checkpointer optimization.
-    
-    **Storage Efficiency**: Reduces PostgreSQL checkpointer size by ~90%
-    **Query Performance**: Faster session loading with minimal message history
-    **Cost Optimization**: Lower token usage + reduced database I/O costs
-    **Audit Compliance**: Messages preserved in database via chat endpoint
+    Performs structured state compression and history pruning to optimize context window and persistence.
+
+    This node implements a "Garbage Collection" strategy for the conversation state. It prevents 
+    unbounded growth of the message history, which directly impacts LLM token costs, inference 
+    latency, and checkpointer I/O overhead within the PostgreSQL backend.
+
+    Operational Logic:
+    1.  Trigger Mechanism: Evaluates the current message stack against pre-defined thresholds 
+        (message count or token density).
+    2.  State Consolidation: Orchestrates an LLM chain to merge the existing `summary` with 
+        new `messages` into a refined JSON schema (Decisions, Constraints, Tasks, Context).
+    3.  Checkpointer Optimization (Pruning): Generates `RemoveMessage` instructions for all 
+        processed messages. This signals the `AsyncPostgresSaver` to exclude these message 
+        IDs from the active state in subsequent checkpoints.
+    4.  State Re-entry: Injects a `SystemMessage` with the `[CONVERSATION_SUMMARIZED]` tag, 
+        ensuring downstream nodes operate on a high-signal, low-noise context.
+
+    Infrastructure Impact:
+    - PostgreSQL Efficiency: By pruning messages, the serialized state size is reduced from 
+      O(n) to O(1) relative to the pruned history, preventing database bloat and reducing 
+      deserialization latency during state recovery.
+    - Determinism: Ensures the GraphState remains within the LLM's optimal performance 
+      window, mitigating "lost-in-the-middle" retrieval issues.
+
+    Error Handling & Resiliency:
+    - Fault Tolerance: On LLM or Parsing failures, the node implements a fail-safe return 
+      of the original state to prevent data loss.
+    - ID Validation: Monitors for messages lacking unique identifiers. Messages without 
+      IDs cannot be pruned via `RemoveMessage` and will trigger a system warning to 
+      alert for potential state corruption or misconfiguration.
+
+    Args:
+        state (GraphState): Current graph state containing 'messages' (List[BaseMessage]) 
+                           and the 'summary' (Dict) object.
+
+    Returns:
+        GraphState: An updated state dictionary containing the consolidated 'summary' 
+                   and a list of `RemoveMessage` + `SystemMessage` objects.
     """
-    messages = state.get("messages", [])
-    summary = state.get("summary", INITIAL_SUMMARY)
-    
-    if not should_summarize(messages):
-        return state
-    
-    # Simple logging - audit trail handled by chat endpoint
-    logger.info(f"Summarizing {len(messages)} messages")
-    
-    try:
-        chain = get_summary_llm() | JsonOutputParser()
-        new_summary = await chain.ainvoke(prompt)
-        
-        # Validate summary structure before committing
-        required_keys = {"decisions", "constraints", "open_tasks", "context"}
-        if not isinstance(new_summary, dict) or not required_keys.issubset(new_summary.keys()):
-            raise ValueError(f"Invalid summary structure. Expected keys: {required_keys}")
-        
-        # Checkpointer optimization: Replace all messages with single summary marker
-        summary_marker = SystemMessage(
-            content=f"[CONVERSATION_SUMMARIZED] {json.dumps(new_summary, ensure_ascii=False)}"
-        )
-        
-        return {
-            "summary": new_summary,
-            "messages": [summary_marker]  # Single message for checkpointer efficiency
-        }
-        
-    except Exception as e:
-        logger.error(f"Summarization failed: {str(e)} — keeping messages intact")
-        return state  # Fail safe - preserve original state
+    pass
 ```
 </details>
 
@@ -904,26 +1046,36 @@ def get_summary_llm():
 ```python
 # Automatic environment detection
 def is_production() -> bool:
-    """Detecta se está em produção via variável PRODUCTION"""
+    """Detects whether the app is running in production via the PRODUCTION variable"""
     return os.getenv("PRODUCTION", "false").lower() == "true"
 
 def get_database_url() -> str:
-    """Retorna URL do banco SQLAlchemy baseada no ambiente"""
+    """Returns the SQLAlchemy database URL based on the environment"""
     if is_production():
-        # AWS RDS - asyncpg para SQLAlchemy
+        # AWS RDS - asyncpg for SQLAlchemy
         return os.getenv("DATABASE_URL_PROD", os.getenv("DATABASE_URL"))
     else:
-        # Docker local - asyncpg
-        return os.getenv("DATABASE_URL", "postgresql+asyncpg://dyno_user:dyno_pass@db:5432/dyno_db")
+        # Local Docker - asyncpg
+        return os.getenv(
+            "DATABASE_URL",
+            "postgresql+asyncpg://dyno_user:dyno_pass@db:5432/dyno_db",
+        )
 
 def get_checkpointer_url() -> str:
-    """Retorna URL do banco para LangGraph checkpointer baseada no ambiente"""
+    """Returns the database URL for the LangGraph checkpointer based on the environment"""
     if is_production():
-        # AWS RDS - psycopg2 para checkpointer
-        return os.getenv("DATABASE_URL_CHECKPOINTER_PROD", os.getenv("DATABASE_URL_CHECKPOINTER"))
+        # AWS RDS - psycopg2 for checkpointer
+        return os.getenv(
+            "DATABASE_URL_CHECKPOINTER_PROD",
+            os.getenv("DATABASE_URL_CHECKPOINTER"),
+        )
     else:
-        # Docker local - psycopg2
-        return os.getenv("DATABASE_URL_CHECKPOINTER", "postgresql://dyno_user:dyno_pass@db:5432/dyno_db?sslmode=disable")
+        # Local Docker - psycopg2
+        return os.getenv(
+            "DATABASE_URL_CHECKPOINTER",
+            "postgresql://dyno_user:dyno_pass@db:5432/dyno_db?sslmode=disable",
+        )
+
 ```
 
 </details>
@@ -971,8 +1123,6 @@ DATABASE_URL_CHECKPOINTER_PROD=postgresql://user:pass@rds-endpoint.amazonaws.com
 - **Type Safety**: Prevents runtime errors with proper type hints
 - **Query Builder**: Generates optimized SQL without writing raw queries
 - **Migration Management**: Alembic handles schema changes safely
-
-> **Important**: All SQL queries shown below are **automatically generated by SQLAlchemy ORM** from our Python models and query builders. We don't write raw SQL - these examples show what SQLAlchemy produces under the hood.
 
 ### PostgreSQL Array Fields: Why Not Separate Tables?
 
@@ -1128,53 +1278,6 @@ def downgrade():
 - **Flexible**: Can optimize specific queries without affecting others
 - **Cost-Effective**: Only create indexes that provide measurable benefits
 
-### Complete SQLAlchemy Models
-
-<details>
-<summary>Database Models Implementation</summary>
-
-```python
-# Core allocation model with relationships
-class Allocation(Base):
-    __tablename__ = "allocations"
-    id = Column(Integer, primary_key=True, index=True)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
-    dyno_id = Column(Integer, ForeignKey("dynos.id"), nullable=True)
-    test_type = Column(String, nullable=False)
-    start_date = Column(Date, nullable=True)
-    end_date = Column(Date, nullable=True)
-    status = Column(String, nullable=False, default="scheduled")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
-    vehicle = relationship("Vehicle", back_populates="allocations")
-    dyno = relationship("Dyno", back_populates="allocations")
-
-# Dyno model with PostgreSQL array fields - KEY ARCHITECTURAL DECISION
-class Dyno(Base):
-    __tablename__ = "dynos"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, nullable=False)
-    # Arrays instead of junction tables for performance
-    supported_weight_classes = Column(ARRAY(String), nullable=False, default=[])  
-    supported_drives = Column(ARRAY(String), nullable=False, default=[])          
-    supported_test_types = Column(ARRAY(String), nullable=False, default=[])      
-    # Maintenance windows - nullable for always-available dynos
-    available_from = Column(Date, nullable=True)  
-    available_to = Column(Date, nullable=True)
-    enabled = Column(Boolean, default=True)
-    allocations = relationship("Allocation", back_populates="dyno")
-
-# Vehicle model with compatibility fields
-class Vehicle(Base):
-    __tablename__ = "vehicles"
-    # ... standard fields ...
-    weight_lbs = Column(Integer, nullable=True)  # Raw weight for calculations
-    weight_class = Column(String, nullable=True)  # Derived class for matching
-    drive_type = Column(String, nullable=True)    # Critical for dyno compatibility
-    # ...
-```
-
-</details>
 
 ### Why This Schema Design?
 
@@ -1255,6 +1358,7 @@ WHERE dwc.weight_class = '<10K'
 <summary>Smart Allocation Algorithm Implementation</summary>
 
 ```python
+# app/services/allocation_service.py
 async def find_available_dynos_core(self, start_date: date, end_date: date, weight_lbs: int, drive_type: str, test_type: str):
     """
     Multi-dimensional compatibility matching using PostgreSQL array operators.
@@ -1273,19 +1377,33 @@ async def find_available_dynos_core(self, start_date: date, end_date: date, weig
     stmt = (
         select(Dyno)
         .where(
-            Dyno.enabled == True,  # Operational dynos only
-            # Array containment - the key performance optimization
+            Dyno.enabled == True,
+            # Compatibility checks using PostgreSQL @> array operators
             Dyno.supported_weight_classes.op("@>")([weight_class]),
             Dyno.supported_drives.op("@>")([drive_type]),
             Dyno.supported_test_types.op("@>")([test_type]),
-            # Maintenance window logic - critical for real operations
+            # Maintenance/availability windows
             or_(Dyno.available_from == None, Dyno.available_from <= start_date),
             or_(Dyno.available_to == None, Dyno.available_to >= end_date),
+            # Exclude dynos with conflicting allocations (NOT EXISTS is more efficient than NOT IN)
+            ~exists().where(
+                and_(
+                    Allocation.dyno_id == Dyno.id,
+                    Allocation.status != "cancelled",
+                    llocation.start_date <= end_date,
+                    Allocation.end_date >= start_date
+                )
+            )
         )
-        .order_by(Dyno.name)  # Consistent ordering for predictable results
+        .order_by(Dyno.name)
     )
     result = await self.db.execute(stmt)
+
+    # Error handling logic
+    #...
+
     return [dict(id=d.id, name=d.name) for d in result.scalars().all()]
+
 ```
 
 </details>
@@ -1362,6 +1480,7 @@ CREATE INDEX idx_dynos_test_types ON dynos USING GIN (supported_test_types);
 <summary>Concurrency Control Implementation</summary>
 
 ```python
+# app/services/allocation_service.py
 async def try_window(self, start_date: date, end_date: date):
     """
     Sophisticated concurrency control preventing double-booking in high-load scenarios.
@@ -1372,77 +1491,81 @@ async def try_window(self, start_date: date, end_date: date):
     3. Atomic transactions ensure consistency
     4. Graceful fallback maintains user experience
     
-    Real-World Scenario: 50 engineers trying to book the same dyno simultaneously
+    Real-World Scenario: 5 engineers trying to book the same dyno simultaneously
     - Only one succeeds, others get next-best option
     - Zero data corruption or double-booking
     - Sub-second response times maintained
     """
     
-    # Step 1: Find compatible dynos (no locking yet)
-    candidates = await self.find_available_dynos_core(
-        start_date, end_date, vehicle.weight_lbs, vehicle.drive_type, test_type
-    )
-    
-    if not candidates:
+    # Step 1: Find compatible & apparently available dynos (no locks yet)
+        candidates = await self.find_available_dynos_core(
+            s_date,
+            e_date,
+            vehicle.weight_lbs,
+            vehicle.drive_type,
+            test_type
+        )
+
+        # Step 2: Try dynos one by one with row-level locking
+        for candidate in candidates:
+            dyno_id = candidate["id"]
+
+            try:
+                async with self.db.begin():
+                    # Lock dyno row
+                    dyno = (
+                        await self.db.execute(
+                            select(Dyno)
+                            .where(Dyno.id == dyno_id)
+                            .with_for_update()
+                        )
+                    ).scalar_one_or_none()
+
+                    if not dyno or not dyno.enabled:
+                        continue
+
+                    # Re-check for overlapping allocations after lock
+                    existing_alloc = await self.db.execute(
+                        select(func.count(Allocation.id))
+                        .where(
+                            Allocation.dyno_id == dyno_id,
+                            Allocation.status != "cancelled",
+                            Allocation.start_date <= e_date,
+                            Allocation.end_date >= s_date,
+                        )
+                    )
+
+                    if existing_alloc.scalar() > 0:
+                        # Dyno lost to race condition → try next
+                        continue
+
+                    # Create allocation atomically
+                    alloc = Allocation(
+                        vehicle_id=vehicle.id,
+                        dyno_id=dyno_id,
+                        test_type=test_type,
+                        start_date=s_date,
+                        end_date=e_date,
+                        status="scheduled",
+                    )
+
+                    self.db.add(alloc)
+                    await self.db.flush()
+
+                    return {
+                        "allocation_id": alloc.id,
+                        "dyno_id": dyno.id,
+                        "dyno_name": dyno.name,
+                        "start_date": str(alloc.start_date),
+                        "end_date": str(alloc.end_date),
+                        "status": alloc.status,
+                    }
+
+            except SQLAlchemyError as e:
+                raise DatabaseQueryError(str(e))
+
+        # All candidates failed
         return None
-    
-    # Step 2: Try each candidate with concurrency control
-    for candidate in candidates:
-        dyno_id = candidate["id"]
-        
-        try:
-            # CRITICAL: Acquire exclusive lock on dyno row
-            # This prevents other processes from modifying this dyno
-            lock_q = select(Dyno).where(Dyno.id == dyno_id).with_for_update()
-            dyno = (await self.db.execute(lock_q)).scalar_one_or_none()
-            
-            if not dyno or not dyno.enabled:
-                continue  # Dyno became unavailable, try next
-            
-            # CRITICAL: Re-verify no conflicts (within locked transaction)
-            # Why: Another process might have created allocation before we got lock
-            conflict_q = select(Allocation).where(
-                Allocation.dyno_id == dyno_id,
-                Allocation.status != "cancelled",
-                # Sophisticated overlap detection
-                not_(or_(
-                    Allocation.end_date < start_date,
-                    Allocation.start_date > end_date,
-                ))
-            ).limit(1)
-            
-            if (await self.db.execute(conflict_q)).scalar_one_or_none():
-                continue  # Conflict found, try next dyno
-            
-            # Step 3: Safe to create allocation
-            allocation = Allocation(
-                vehicle_id=vehicle.id,
-                dyno_id=dyno_id,
-                test_type=test_type,
-                start_date=start_date,
-                end_date=end_date,
-                status="scheduled"
-            )
-            
-            self.db.add(allocation)
-            
-            # CRITICAL: Atomic commit - either succeeds completely or fails completely
-            await self.db.commit()
-            await self.db.refresh(allocation)
-            
-            return {  # Success!
-                "allocation_id": allocation.id,
-                "dyno_id": dyno.id,
-                "dyno_name": dyno.name,
-                # ... other fields ...
-            }
-            
-        except Exception as e:
-            # Rollback and try next dyno - graceful failure handling
-            await self.db.rollback()
-            continue
-    
-    return None  # No allocation possible
 ```
 
 </details>
@@ -1534,6 +1657,7 @@ This approach ensures **zero double-booking scenarios** even under high concurre
 <summary>Server-Sent Events Streaming Implementation</summary>
 
 ```python
+# app/routers/chat.py
 async def chat_stream(request: ChatRequest, db: AsyncSession, checkpointer):
     """
     Why This Streaming Pattern:
@@ -1546,6 +1670,8 @@ async def chat_stream(request: ChatRequest, db: AsyncSession, checkpointer):
     - Engineers see allocation progress immediately
     - Reduces perceived latency from 5+ seconds to instant feedback
     - Better user experience during complex multi-step operations
+
+    NOTE: THIS IS A SIMPLIFIED VERSION FOR UNDERSTANDING PURPOSES
     """
     
     async def event_generator() -> AsyncGenerator[str, None]:
@@ -1675,36 +1801,23 @@ class JWTBearer(HTTPBearer):
     
     def __init__(self, auto_error: bool = True):
         super(JWTBearer, self).__init__(auto_error=auto_error)
-    
+
     async def __call__(self, request: Request):
         credentials: HTTPAuthorizationCredentials = await super(JWTBearer, self).__call__(request)
-        
         if credentials:
             if not credentials.scheme == "Bearer":
-                raise HTTPException(
-                    status_code=403, 
-                    detail="Invalid authentication scheme."
-                )
-            
-            if not self.verify_jwt(credentials.credentials):
-                raise HTTPException(
-                    status_code=403, 
-                    detail="Invalid token or expired token."
-                )
-            
+                raise HTTPException(status_code=403, detail="Invalid authentication scheme.")
+            try:
+                payload = decode_jwt(credentials.credentials)
+                if payload is None:
+                    raise HTTPException(status_code=403, detail="Invalid token or expired token.")
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=403, detail="Invalid token or expired token.")
             return credentials.credentials
         else:
-            raise HTTPException(
-                status_code=403, 
-                detail="Invalid authorization code."
-            )
-    
-    def verify_jwt(self, jwtoken: str) -> bool:
-        try:
-            payload = decodeJWT(jwtoken)
-            return payload is not None
-        except:
-            return False  # Fail securely
+            raise HTTPException(status_code=403, detail="Invalid authorization code.")
 ```
 
 </details>
@@ -1725,8 +1838,9 @@ class JWTBearer(HTTPBearer):
 <summary>Async Password Hashing Implementation</summary>
 
 ```python
-# Async bcrypt for non-blocking password operations
-async def hash_password(password: str) -> str:
+# app/auth/passwords_handler.py
+
+async def hash_password_async(password: str) -> str:
     """
     Why Async Executor Pattern:
     - Bcrypt operations run in thread pool
@@ -1738,17 +1852,26 @@ async def hash_password(password: str) -> str:
     - Random salt generation per password
     - Configurable work factor (currently 12 rounds)
     - Constant-time comparison prevents timing attacks
+    
+    Note: Implemented in app/auth/passwords_handler.py as hash_password_async()
     """
-    salt = bcrypt.gensalt()
+    executor = ThreadPoolExecutor()
+    salt = await asyncio.get_event_loop().run_in_executor(
+        executor, bcrypt.gensalt, 12
+    )
     hashed = await asyncio.get_event_loop().run_in_executor(
-        None, bcrypt.hashpw, password.encode('utf-8'), salt
+        executor, bcrypt.hashpw, password.encode('utf-8'), salt
     )
     return hashed.decode('utf-8')
 
-async def verify_password(password: str, hashed: str) -> bool:
-    """Verify password asynchronously"""
+async def verify_password_async(password: str, hashed_password: str) -> bool:
+    """Verify password asynchronously
+    
+    Note: Implemented in app/auth/passwords_handler.py as verify_password_async()
+    """
+    executor = ThreadPoolExecutor()
     return await asyncio.get_event_loop().run_in_executor(
-        None, bcrypt.checkpw, password.encode('utf-8'), hashed.encode('utf-8')
+        executor, bcrypt.checkpw, password.encode('utf-8'), hashed_password.encode('utf-8')
     )
 ```
 
@@ -1791,10 +1914,10 @@ async def verify_password(password: str, hashed: str) -> bool:
 - **Simple Scaling**: Built-in auto-scaling without complex configuration
 
 **Why Not Kubernetes**:
-- **Operational Complexity**: Requires dedicated DevOps expertise
+- **Operational Complexity**: Requires dedicated more DevOps work and probably Tekton pipelines (overkill now)
 - **Management Overhead**: Control plane, worker nodes, networking complexity
 - **Learning Curve**: Steep learning curve for automotive engineers
-- **Overkill**: Our workload doesn't need Kubernetes' advanced features
+- **Overkill**: Our workload doesn't need Kubernetes' advanced features this moment
 
 ### Production ECS Configuration
 

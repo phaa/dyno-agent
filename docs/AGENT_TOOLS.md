@@ -9,49 +9,87 @@ The Dyno-Agent system implements **9 specialized tools** that enable the LangGra
 The LangGraph agent follows a sophisticated execution pattern with database availability checks, tool orchestration, and state management:
 
 ```mermaid
-graph TD
-    START([Entry Point]) --> get_schema[Get Schema Node]
+flowchart TD
+    A["Tool Execution Completed"] --> B["Summarization Node"]
+    B --> C{"Messages ≥ 6 OR Tokens >1800?"}
     
-    get_schema --> check_db{Check DB Available?}
+    C -->|"No"| D["Continue to LLM (no summarization)"]
+    C -->|"Yes"| E["LLM Summarization"]
     
-    check_db -->|DB Available| summarize[Summarize Node]
-    check_db -->|DB Unavailable| db_disabled[DB Disabled Node]
+    E --> F{"Valid JSON schema?"}
+    F -->|"No"| G["Validation Failed Keep Original Messages"]
+    F -->|"Yes"| H["Create conversation summary"]
     
-    db_disabled --> END_DB([End - DB Error])
+    H --> I["Checkpointer Replace 50+ messages -> 1"]
     
-    summarize --> llm[LLM Node<br/>Tool Binding & Reasoning]
+    G --> J["Return to LLM Node"]
+    I --> J
+    D --> J
     
-    llm --> route{Route from LLM}
+    J --> K["LLM Processing"]
+    K --> L{"Error State<br/>Check?"}
     
-    route -->|Tool Call Required| tools[Tools Node<br/>Execute Agent Tools]
-    route -->|No Tool Call| END_SUCCESS([End - Complete])
+    L -->|"Has Error"| M{"Retry Count<br/>> 0?"}
+    L -->|"No Error"| N{"Tool Calls are required?"}
     
-    tools --> summarize
+    M -->|"Yes"| O["Retry Tools Node"]
+    M -->|"No"| P["Graceful Error Handler"]
     
-    %% Styling
-    classDef entryNode fill:#e1f5fe
-    classDef processNode fill:#f3e5f5
-    classDef decisionNode fill:#fff3e0
-    classDef endNode fill:#e8f5e8
-    classDef errorNode fill:#ffebee
+    N -->|"Yes"| Q{"Query Database<br/>Tool?"}
+    N -->|"No"| R["END Conversation"]
     
-    class START,END_SUCCESS,END_DB endNode
-    class get_schema,summarize,llm,tools processNode
-    class check_db,route decisionNode
-    class db_disabled errorNode
+    Q -->|"Yes"| S["Get Schema Node"]
+    Q -->|"No"| T["Tools Node"]
+    
+    S --> T
+    O --> B
+    T --> B
+    P --> B
+    
+    style A fill:#e1f5fe
+    style E fill:#fff3e0
+    style I fill:#e8f5e8
+    style G fill:#ffebee
+    style O fill:#f3e5f5
+    style P fill:#ffebee
+    style S fill:#e0f2f1
 ```
 
-### Flow Components
+## Flow Components
 
-- **Get Schema**: Dynamically fetches database schema for LLM context
-- **Check DB**: Verifies database availability and routes execution
-- **Summarize**: Prepares conversation context and tool results
-- **LLM Node**: Core reasoning with tool binding and decision making
-- **Tools Node**: Executes the 9 specialized agent tools
-- **DB Disabled**: Graceful fallback when database is unavailable
+- **Summarization Node**  
+  Evaluates the conversation size (messages ≥ 6 or tokens > 1800) and determines whether context summarization is required before continuing execution.
+- **LLM Summarization**  
+  Generates a structured summary of the conversation when triggered, ensuring that essential context is preserved while reducing token usage.
+- **Validation & Checkpointer**  
+  Validates the JSON schema produced by the summarization step. When successful, replaces large message histories (50+ messages) with a single persisted summary using the checkpointer.
+- **LLM Node**  
+  Core reasoning engine of the agent.  
+  Responsible for deciding the next action based on the current context:
+  - Continue the conversation
+  - Request tool execution
+  - Handle error or retry states
+- **Tool Routing**  
+  Interprets the LLM output and determines whether:
+  - A tool call is required
+  - The conversation can be safely terminated
+  - A retry flow should be triggered
+- **Get Schema Node**  
+  Dynamically retrieves the database schema to enrich the LLM context before executing structured queries or database-related operations.
+- **Tools Node**  
+  Executes the agent’s specialized tools (e.g., database queries, external integrations, validations) and returns the results back to the LLM for further reasoning.
+- **Retry Handler**  
+  Manages retry attempts when tool execution fails, enforcing configured retry limits.
+- **Graceful Error Handler**  
+  Safely terminates the flow when no retries remain or an unrecoverable error occurs.
 
-### Main Loop
-The agent executes in a loop: `summarize → llm → tools → summarize` until the LLM determines the task is complete (no tool calls required).
+---
+
+### Design Notes
+
+The agent follows a deterministic **LLM → Tools → LLM** loop, with context checkpointing and summarization to ensure stability, predictable cost, and protection against token overflow.  
+Tools are treated as controlled side effects, while the LLM remains the central orchestrator of the workflow.
+
 
 ## Tool Inventory
 

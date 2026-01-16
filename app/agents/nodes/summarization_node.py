@@ -1,6 +1,6 @@
 import json
 import logging
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import BaseMessage, SystemMessage, RemoveMessage
 from langchain_core.output_parsers import JsonOutputParser
 from ..state import GraphState
 from .config import (
@@ -19,39 +19,46 @@ def format_messages(messages: list[BaseMessage]) -> str:
 
 async def summarization_node(state: GraphState):
     """
-    Production-grade conversation summarization with checkpointer optimization.
-    
-    Purpose: Prevents context window overflow by condensing conversation history
-    into structured summaries while optimizing PostgreSQL checkpointer storage.
-    
-    Architecture:
-    - Trigger Logic: Activates when messages ≥6 or tokens >1800 (configurable)
-    - LLM Chain: Uses JsonOutputParser for robust structured output parsing
-    - Checkpointer Optimization: Replaces message history with single summary marker
-    - Fail-Safe: Graceful degradation - keeps original messages on parsing errors
-    
-    Summary Schema:
-    ```json
-    {
-        "decisions": ["Vehicle X allocated to Dyno 3"],
-        "constraints": ["AWD vehicles only", "Maintenance window 2-4pm"],
-        "open_tasks": ["Check dyno availability next week"],
-        "context": "User managing vehicle allocations for Q4 testing"
-    }
-    ```
-    
-    Error Handling:
-    - Parsing Failures: Falls back to original messages, no data loss
-    - LLM Timeouts: Graceful degradation with detailed error logging
-    - State Corruption: Validates summary structure before committing
-    
+    Performs structured state compression and history pruning to optimize context window and persistence.
+
+    This node implements a "Garbage Collection" strategy for the conversation state. It prevents 
+    unbounded growth of the message history, which directly impacts LLM token costs, inference 
+    latency, and checkpointer I/O overhead within the PostgreSQL backend.
+
+    Operational Logic:
+    1.  Trigger Mechanism: Evaluates the current message stack against pre-defined thresholds 
+        (message count or token density).
+    2.  State Consolidation: Orchestrates an LLM chain to merge the existing `summary` with 
+        new `messages` into a refined JSON schema (Decisions, Constraints, Tasks, Context).
+    3.  Checkpointer Optimization (Pruning): Generates `RemoveMessage` instructions for all 
+        processed messages. This signals the `AsyncPostgresSaver` to exclude these message 
+        IDs from the active state in subsequent checkpoints.
+    4.  State Re-entry: Injects a `SystemMessage` with the `[CONVERSATION_SUMMARIZED]` tag, 
+        ensuring downstream nodes operate on a high-signal, low-noise context.
+
+    Infrastructure Impact:
+    - PostgreSQL Efficiency: By pruning messages, the serialized state size is reduced from 
+      O(n) to O(1) relative to the pruned history, preventing database bloat and reducing 
+      deserialization latency during state recovery.
+    - Determinism: Ensures the GraphState remains within the LLM's optimal performance 
+      window, mitigating "lost-in-the-middle" retrieval issues.
+
+    Error Handling & Resiliency:
+    - Fault Tolerance: On LLM or Parsing failures, the node implements a fail-safe return 
+      of the original state to prevent data loss.
+    - ID Validation: Monitors for messages lacking unique identifiers. Messages without 
+      IDs cannot be pruned via `RemoveMessage` and will trigger a system warning to 
+      alert for potential state corruption or misconfiguration.
+
     Args:
-        state: GraphState containing messages and optional existing summary
-        
+        state (GraphState): Current graph state containing 'messages' (List[BaseMessage]) 
+                           and the 'summary' (Dict) object.
+
     Returns:
-        GraphState: Updated state with new summary and single summary marker message
-                   or unchanged state (if summarization not needed/failed)
+        GraphState: An updated state dictionary containing the consolidated 'summary' 
+                   and a list of `RemoveMessage` + `SystemMessage` objects.
     """
+    
     messages = state.get("messages", [])
     summary = state.get("summary", INITIAL_SUMMARY)
     conversation_id = state.get("conversation_id", "unknown")
@@ -78,13 +85,18 @@ async def summarization_node(state: GraphState):
         logger.info(f"Summarization completed successfully for conversation_id: {conversation_id}")
         
         # Checkpointer optimization: Replace all messages with single summary marker
+        ids_to_delete = [m.id for m in messages if m.id]
+        if len(ids_to_delete) < len(messages):
+            logger.warning(f"Some messages do not have ID and could not be removed from state in {conversation_id}")
+
+        delete_messages = [RemoveMessage(id=mid) for mid in ids_to_delete]
         summary_marker = SystemMessage(
             content=f"[CONVERSATION_SUMMARIZED] \n{json.dumps(new_summary, ensure_ascii=False)}"
         )
         
         return {
             "summary": new_summary,
-            "messages": [summary_marker]  # Single message for checkpointer efficiency
+            "messages": delete_messages + [summary_marker]  # Single message for checkpointer efficiency
         }
         
     except Exception as e:

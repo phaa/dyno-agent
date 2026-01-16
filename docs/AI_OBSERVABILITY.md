@@ -1,4 +1,4 @@
-# 🤖 AI Observability & Conversation Analytics
+# AI Observability & Conversation Analytics
 
 ## For Recruiters & Technical Managers
 
@@ -13,8 +13,9 @@
 # LangGraph automatically traces to LangSmith - no decorators needed!
 # Just configure environment variables:
 LANGSMITH_API_KEY=your_key_here
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_PROJECT=dyno-agent-production
+LANGSMITH_TRACING=true
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_PROJECT=dyno-agent-production
 ```
 
 #### 2. **Real Conversation Metrics**
@@ -123,10 +124,6 @@ metrics_storer.record_method_execution(
 ✅ **Automatic error tracking** and debugging capabilities  
 ✅ **Performance monitoring** with correlation IDs  
 ✅ **Cost visibility** through LangSmith integration  
-
-### Interview Talking Points
-
-**"I implemented comprehensive AI observability using LangSmith's automatic tracing - no manual decorators needed. The system tracks every conversation in PostgreSQL while LangGraph automatically sends traces to LangSmith for cost and performance monitoring. This demonstrates production-ready AI engineering with enterprise-grade observability."**
 
 **Key technical points:**
 - Automatic LangGraph tracing to LangSmith

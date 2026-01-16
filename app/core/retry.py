@@ -17,28 +17,40 @@ logger = logging.getLogger(__name__)
 
 F = TypeVar("F", bound=Callable[..., Any])
 
-
 class RetryableError(Exception):
-    """Exception that can be recovered with retry.
+    """
+    Exception that should be retried with exponential backoff.
     
-    Used for transient errors like:
-    - Network timeouts
-    - Database connection failures
-    - Temporary service unavailability
+    Used for transient, temporary failures that may succeed on retry:
+    - Database connection timeouts and temporary unavailability
+    - Network timeouts and intermittent connectivity issues
+    - Rate limit errors (API service recovering)
+    - Temporary resource exhaustion (connection pool saturation)
+    - Service restarts and rolling deployments
+    
+    Production Pattern:
+    except SQLAlchemyError as e:
+        if is_connection_error(e):
+            raise RetryableError(f"Database connection failed: {str(e)}") from e
     """
     pass
-
 
 class NonRetryableError(Exception):
-    """Exception that should not be retried.
+    """
+    Exception that should NOT be retried.
     
-    Used for permanent errors like:
-    - Authentication failures
-    - Validation errors
-    - Malformed requests
+    Used for permanent, deterministic failures that won't change on retry:
+    - Authentication and authorization failures (wrong credentials)
+    - User not found in database (400/404 errors)
+    - Validation errors (malformed input, business rule violations)
+    - Resource access denied (403 forbidden)
+    - Configuration errors (missing required settings)
+    
+    Production Pattern:
+    except ValueError as e:
+        raise NonRetryableError(f"Invalid user input: {str(e)}") from e
     """
     pass
-
 
 def async_retry(
     max_attempts: int = 3,

@@ -423,22 +423,32 @@ Enterprise-grade monitoring stack with Prometheus, Grafana, CloudWatch integrati
 
 ```mermaid
 graph LR
-    A[FastAPI App] --> B[Prometheus]
+    A[FastAPI + LangGraph] --> B[Prometheus]
     A --> C[CloudWatch]
-    B --> D[Grafana]
     A --> E[Structured Logs]
-    
+    A --> LS[LangSmith]
+
+    B --> D[Grafana]
+
     subgraph "Real-time Dashboards"
         D
         F[Business Metrics]
         G[Performance Metrics]
     end
-    
+
+    subgraph "LLM Observability"
+        LS
+        J[Prompt Traces]
+        K[Graph Execution]
+        L[LLM Evaluations]
+    end
+
     subgraph "AWS Monitoring"
         C
         H[CloudWatch Alarms]
         I[Cost Tracking]
     end
+
 ```
 
 ### Multi-Backend Architecture
@@ -469,9 +479,6 @@ make prometheus-url # http://localhost:9090
 - **AI Analytics**: LangSmith integration for conversation tracking and token usage
 - **Real-time Dashboards**: Performance metrics, success rates, and system health
 - **Production Ready**: Persistent storage, alerting, and enterprise observability
-
----
-
 
 ---
 

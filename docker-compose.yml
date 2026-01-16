@@ -1,55 +1,53 @@
 services:
-  db:  # Banco PostgreSQL
+  db:
     image: postgres:15
     container_name: dyno_postgres
     env_file:
-      - .env  # Variáveis de ambiente (.env)
+      - .env
     volumes:
-      - ./db/data:/var/lib/postgresql/data  # Persistência de dados
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql  # Script de inicialização
+      - ./db/data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "5432:5432"  # Porta do PostgreSQL
+      - "5432:5432"
 
-  fastapi:  # Aplicação principal
-    build: ./app  # Constrói imagem da pasta app/
+  fastapi:
+    build: ./app
     container_name: dyno_fastapi
     env_file:
-      - .env  # Variáveis de ambiente
+      - .env
     depends_on:
-      - db  # Espera banco subir primeiro
+      - db
     ports:
-      - "8000:8000"  # Porta da API
+      - "8000:8000"
     volumes:
-      - ./app:/app # monta a pasta app do projeto na pasta app do container
-      - ./app/migrations:/app/migrations # monta migrations em tempo de execução
+      - ./app:/app
+      - ./app/migrations:/app/migrations
 
-  prometheus:  # Sistema de métricas
+  prometheus:
     image: prom/prometheus:latest
     container_name: dyno_prometheus
     ports:
-      - "9090:9090"  # Interface web do Prometheus
+      - "9090:9090"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml  # Configuração
-    command:  # Parâmetros de inicialização
-      - '--config.file=/etc/prometheus/prometheus.yml'  # Arquivo de config
-      - '--storage.tsdb.path=/prometheus'  # Pasta de dados
-      - '--web.console.libraries=/etc/prometheus/console_libraries'  # Bibliotecas web
-      - '--web.console.templates=/etc/prometheus/consoles'  # Templates web
-      - '--web.enable-lifecycle'  # Permite reload via API
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
 
-  grafana:  # Dashboards e visualização
+  grafana:
     image: grafana/grafana:latest
     container_name: dyno_grafana
     ports:
-      - "3000:3000"  # Interface web do Grafana
+      - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin  # Senha do admin
-      - GF_USERS_ALLOW_SIGN_UP=false  # Desabilita cadastro público
-      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning  # Provisioning automático
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
     volumes:
-      - grafana-storage:/var/lib/grafana  # Persistência de dados
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning  # Configuração automática
-      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards  # Dashboards
+      - grafana-storage:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards
 
 volumes:
-  grafana-storage:  # Volume nomeado para dados do Grafana
+  grafana-storage:

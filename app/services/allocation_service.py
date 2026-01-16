@@ -104,8 +104,8 @@ class AllocationService:
         
         # OPTIMIZATION: Combine compatibility + availability check with NOT EXISTS
         # Exclude dynos with conflicting allocations in single query
-        # Suggested index: CREATE INDEX idx_allocation_dyno_dates ON allocation(dyno_id, start_date, end_date) WHERE status != 'cancelled';
-        # Suggested index: CREATE INDEX idx_dyno_arrays ON dyno USING GIN(supported_weight_classes, supported_drives, supported_test_types);
+        # Future index: CREATE INDEX idx_allocation_dyno_dates ON allocation(dyno_id, start_date, end_date) WHERE status != 'cancelled';
+        # Future index: CREATE INDEX idx_dyno_arrays ON dyno USING GIN(supported_weight_classes, supported_drives, supported_test_types);
         
         try:
             stmt = (

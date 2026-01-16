@@ -1,5 +1,46 @@
 # AWS Infrastructure - Dyno Agent
 
+## Important Disclaimer (Scope & Intent)
+
+> ⚠️ This infrastructure is designed for **demonstration, learning, and portfolio purposes**.
+>  
+> Several production best practices are **intentionally simplified** and clearly documented
+> to prioritize clarity, learning, and cost awareness over enterprise-grade completeness.
+
+Examples of intentional simplifications:
+- Single-instance ECS services
+- No auto-scaling policies
+- Basic authentication for Grafana
+- Simplified secrets handling for local development
+
+All such decisions are **explicit, conscious trade-offs**, not omissions.
+
+---
+
+## Overview
+
+Terraform is used to bootstrap and evolve the production infrastructure.
+
+Its responsibilities include creating and managing long-lived AWS resources such as
+networking (VPC, subnets), compute orchestration (ECS, ALB), persistent storage (RDS, EFS),
+IAM roles, and secret containers (AWS Secrets Manager), but not the application secrets
+themselves.
+
+Application deployments, container builds, and image publishing are handled exclusively
+by the CI/CD pipeline, which updates running services without modifying the underlying
+infrastructure.
+
+Runtime secrets (e.g. database credentials, external API keys such as LLM providers)
+are never stored in Terraform state or configuration files in production.
+Instead, they are managed by AWS Secrets Manager and accessed at runtime via
+IAM-scoped permissions from the application containers.
+
+This separation ensures:
+- Clear ownership boundaries between infrastructure and application lifecycle
+- Secure secret handling with no dependency on developer machines
+- Repeatable deployments and predictable runtime behavior
+
+
 Terraform for deploying Dyno-Agent project on AWS using:
 - **ECS Fargate** (containers - 0.5 vCPU, 1GB RAM)
 - **RDS PostgreSQL** (database - db.t3.micro)
@@ -14,58 +55,67 @@ Terraform for deploying Dyno-Agent project on AWS using:
 ```mermaid
 graph TB
     subgraph "Internet"
-        Users[👥 Users]
+        Users[Users]
     end
-    
+
     subgraph "AWS VPC"
         subgraph "Public Subnets"
-            ALB[🔄 Application Load Balancer]
+            ALB[Application Load Balancer]
         end
-        
+
         subgraph "Private Subnets"
             subgraph "ECS Fargate Cluster"
-                FastAPI[🚀 FastAPI App<br/>0.5 vCPU, 1GB RAM]
-                Prometheus[📊 Prometheus<br/>0.5 vCPU, 1GB RAM]
-                Grafana[📈 Grafana<br/>0.5 vCPU, 1GB RAM]
+                FastAPI[FastAPI App]
+                Prometheus[Prometheus]
+                Grafana[Grafana]
             end
-            
-            RDS[(🗄️ RDS PostgreSQL<br/>db.t3.micro, 20GB)]
+
+            RDS[(RDS PostgreSQL)]
         end
-        
-        EFS[💾 EFS Storage<br/>Monitoring Data]
+
+        EFS[EFS Storage]
     end
-    
+
     subgraph "AWS Services"
-        ECR[📦 ECR Registry]
-        Secrets[🔐 Secrets Manager]
-        CloudWatch[☁️ CloudWatch Logs]
+        ECR[ECR Registry]
+        Secrets[Secrets Manager]
+        CloudWatch[CloudWatch Custom Metrics]
     end
-    
-    %% User Flow
+
     Users --> ALB
     ALB --> FastAPI
     ALB --> Prometheus
     ALB --> Grafana
-    
-    %% Data Flow
     FastAPI --> RDS
-    FastAPI --> Secrets
     Prometheus --> EFS
     Grafana --> EFS
-    
-    %% Deployment Flow
-    ECR --> FastAPI
-    ECR --> Prometheus
-    ECR --> Grafana
-    
-    %% Monitoring Flow
-    FastAPI --> CloudWatch
-    FastAPI --> Prometheus
-    
-    %% Environment Detection
-    FastAPI -.->|PRODUCTION=true| RDS
-    FastAPI -.->|asyncpg + psycopg2| RDS
+    FastAPI --> Secrets
+    MonitoringService[Python Monitoring Service] --> CloudWatch
 ```
+---
+
+## Configuration & Secrets Strategy
+
+### Dual Secrets Strategy (Intentional)
+
+**Local Development**
+- terraform.tfvars
+- .env files
+- Docker Compose
+
+**Production**
+- AWS Secrets Manager
+- Injected via ECS task definitions
+- IAM-scoped access only
+
+> Secrets stored in `terraform.tfvars` are **never intended for production use**.
+> Production secrets are managed exclusively through AWS Secrets Manager.
+
+This dual approach mirrors real-world engineering trade-offs:
+- Developer Experience locally
+- Security and compliance in production
+
+---
 
 ### Environment Detection Flow
 
@@ -76,8 +126,8 @@ flowchart LR
     Check -->|false| Dev[Development Mode]
     Check -->|true| Prod[Production Mode]
     
-    Dev --> DockerDB[(🐳 Docker PostgreSQL<br/>db:5432<br/>sslmode=disable)]
-    Prod --> AWSRDS[(☁️ AWS RDS<br/>rds-endpoint:5432<br/>sslmode=require)]
+    Dev --> DockerDB[(Docker PostgreSQL<br/>db:5432<br/>sslmode=disable)]
+    Prod --> AWSRDS[(AWS RDS<br/>rds-endpoint:5432<br/>sslmode=require)]
     
     DockerDB --> SQLAlchemy[SQLAlchemy<br/>asyncpg driver]
     DockerDB --> Checkpointer[LangGraph<br/>psycopg2 driver]
@@ -204,6 +254,24 @@ terraform destroy
 - `private_subnet_ids` → Private subnet IDs
 
 ## Current Configuration
+
+### CloudWatch Integration
+
+In addition to Prometheus, the system publishes custom application and business metrics
+directly to Amazon CloudWatch using a dedicated Python monitoring service and the boto3 SDK.
+
+This hybrid approach allows:
+- High-frequency, low-cost metrics via Prometheus
+- Low-frequency, business-critical metrics via CloudWatch
+- Native AWS alarms and dashboards for key KPIs
+
+### Why Prometheus + CloudWatch (Hybrid)
+
+CloudWatch is used selectively for low-volume, high-value metrics
+(e.g. SLA breaches, error rates, allocation failures).
+
+Prometheus handles high-cardinality, high-frequency metrics
+to avoid excessive CloudWatch costs.
 
 ### ECS Services
 

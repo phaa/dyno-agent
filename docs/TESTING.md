@@ -206,4 +206,3 @@ async def test_service_retries_on_db_timeout(mock_async_session):
 
 If something goes wrong when running tests locally, include the `pytest -q -r a` output and we will help diagnose.
 
-        ## Running the tests

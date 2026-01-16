@@ -9,12 +9,12 @@ logger = logging.getLogger(__name__)
 def route_from_llm(state: GraphState):
     """Routing with error handling after LLM processing.
     
-    **Routing Logic**:
-    - **Error State**: Routes to error handler based on retry_count
-    - **Tool Calls**: Routes to schema loading or direct tool execution
-    - **No Tools**: Ends conversation normally
+    Routing Logic:
+    - Error State: Routes to error handler based on retry_count
+    - Tool Calls: Routes to schema loading or direct tool execution
+    - No Tools: Ends conversation normally
     
-    **Error Handling**:
+    Error Handling:
     - retry_count > 0: Routes back to tools for retry
     - retry_count = 0: Routes to graceful error handler
     - No error: Normal tool/schema routing

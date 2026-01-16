@@ -1,5 +1,5 @@
 variable "production" {
-  description = "Indica se é ambiente de produção"
+  description = "Wether to deploy in production mode"
   type        = bool
   default     = true
 }
@@ -13,7 +13,7 @@ variable "project_name" {
 }
 
 variable "db_password" {
-  description = "Senha do Postgres"
+  description = "Postgres Database Password"
   type        = string
   sensitive   = true
 }
@@ -30,7 +30,7 @@ variable "gemini_api_key" {
   type        = string
   sensitive   = true
   default     = ""
-}
+} 
 
 variable "jwt_secret" {
   description = "JWT Secret Key"

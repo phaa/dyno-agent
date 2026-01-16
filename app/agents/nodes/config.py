@@ -119,6 +119,6 @@ def get_model_with_tools():
 # Helper functions
 def should_summarize(messages: list) -> bool:
     return (
-        len(messages) >= 6 or
+        len(messages) >= 10 or
         count_tokens_approximately(messages) > 1800
     )
