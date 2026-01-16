@@ -245,6 +245,7 @@ docker-compose down
 #### Local Development Commands
 ```bash
 # Database operations (local Docker PostgreSQL)
+make new-migration "migration-name"
 make migrate        # Run Alembic migrations
 make seed          # Seed test data
 make db-shell      # Connect to local PostgreSQL
@@ -325,7 +326,7 @@ curl -X POST http://localhost:8000/auth/register \
 curl -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "johndoe@example.com", "password": "secure123"}'
-# Returns: {"access_token": "eyJ...", "token_type": "bearer"}
+# Returns: {"access_token": "eyJ..."}
 
 # Chat with AI agent (SSE streaming)
 curl -X POST http://localhost:8000/chat/stream \
@@ -497,12 +498,14 @@ make prometheus-url # http://localhost:9090
 - [x] **Infrastructure as Code**: Terraform configuration for AWS deployment
 - [x] **CI/CD Pipeline**: GitHub Actions setup for automated deployment
 - [x] **Business Metrics System**: ROI tracking, time savings, cost analysis
+- [x] **Async Retry Mechanism**: Asynchronous retries for database operations and external API calls with exponential backoff.
 - [x] **AI Observability**: LangSmith integration for conversation analytics
 - [x] **ECS Fargate Deployment**: Containerized application on AWS
 - [x] **Caching Strategy**: primitive cache strategy for nodes retrieval
 
 ### Planned Features
-- [] **Redis Caching**: Comprehensive caching strategy with Redis for reduced latency and resource usage.
+- [ ] **Redis Caching**: Comprehensive caching strategy with Redis for reduced latency and resource usage.
+- [ ] **Golden Set for AI Evaluation**: Curated, domain-validated dataset for regression testing, prompt validation, and agent behavior evaluation.
 - [ ] **Frontend Interface**: React/Vue.js web interface for non-technical users
 - [ ] **Advanced RAG System**: FAISS vector store for technical documentation search
 - [ ] **ECS Auto-scaling**: Dynamic scaling based on CPU/memory usage

@@ -7,7 +7,7 @@ from sqlalchemy import String, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.db import Base
-from .rbac import Role, UserRole
+from models.rbac import Role, UserRole
 
 
 class User(Base):
@@ -43,7 +43,8 @@ class User(Base):
     # Many-to-many convenience relationship with Role
     roles: Mapped[list[Role]] = relationship(
         secondary="user_role",
-        lazy="selectin"
+        lazy="selectin",
+        overlaps="user,user_roles"
     )
 
     # Helper method to get all permissions

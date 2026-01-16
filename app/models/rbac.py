@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List
+from typing import List, TYPE_CHECKING
 
-from sqlalchemy import Integer, String, DateTime, ForeignKey
+from sqlalchemy import Integer, String, DateTime, ForeignKey, Table, Column
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.db import Base
+
+if TYPE_CHECKING:
+    from models.user import User
 
 
 class Role(Base):
@@ -96,3 +99,12 @@ class UserRole(Base):
     )
 
     role: Mapped[Role] = relationship()
+
+
+# Association table between Role and Permission
+role_permission = Table(
+    "role_permission",
+    Base.metadata,
+    Column("role_id", ForeignKey("roles.id"), primary_key=True),
+    Column("permission_id", ForeignKey("permissions.id"), primary_key=True),
+)

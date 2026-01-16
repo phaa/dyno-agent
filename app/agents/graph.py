@@ -1,6 +1,6 @@
-from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import StateGraph
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.constants import START
 from .state import GraphState
 from .nodes import (
     get_schema_node, 
@@ -8,7 +8,7 @@ from .nodes import (
     llm_node,
     tool_node,
     route_from_llm,
-    check_db,
+    route_from_summarize,
     summarization_node,
     graceful_error_handler,
 )
@@ -22,7 +22,6 @@ async def build_graph(checkpointer: AsyncPostgresSaver = None) -> StateGraph:
     Builds the LangGraph for the dynamometer allocation agent.
     
     Components:
-    - check_db: Verifies database availability and routes flow (entry point)
     - get_schema: Fetches DB schema dynamically when query_database tool is needed
     - summarize: Summarizes messages and prepares context for LLM
     - llm: Main processing with tool bindings and error routing
@@ -39,7 +38,7 @@ async def build_graph(checkpointer: AsyncPostgresSaver = None) -> StateGraph:
     - Error state tracking and recovery mechanisms
     
     Main Loop:
-    The graph executes: check_db → summarize → llm → (get_schema if needed) → tools → summarize
+    The graph executes: should_summarize → summarize → llm → (get_schema if needed) → tools → summarize
     until the LLM decides to finish (no tool calls).
     
     Args:
@@ -67,10 +66,10 @@ async def build_graph(checkpointer: AsyncPostgresSaver = None) -> StateGraph:
     builder.add_node("error_handler", graceful_error_handler) # Node for graceful error handling
 
     # ---- Entry Point ----
-    builder.set_entry_point("check_db")
+    #builder.set_entry_point("summarize_if_needed")
 
-    # ---- Conditional Edges ----
-    builder.add_conditional_edges("check_db", check_db) # summarize or db_disabled based on DB availability
+    # ---- Edges ----
+    builder.add_conditional_edges(START, route_from_summarize)  # start → summarize or llm
     builder.add_edge("summarize", "llm")
     builder.add_conditional_edges("llm", route_from_llm)  # tools, error_handler, get_schema, or END
     builder.add_edge("get_schema", "tools") # after schema fetch, execute tools

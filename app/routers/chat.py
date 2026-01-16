@@ -19,6 +19,7 @@ from core.conversation_metrics import ConversationMetrics
 from core.retry import RetryableError, NonRetryableError
 from schemas.chat import ChatRequest
 from middleware.rate_limit import limiter
+from models.user import User
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("langchain").setLevel(logging.DEBUG)
@@ -66,14 +67,17 @@ async def chat_stream(
             user_email=user_email,
             conversation_id=conv_id
         )
+        # Async + streaming = avoid lazy loading after await
+        # Avoid conversation.user lazy load issues
+        user = await db.get(User, user_email)
     except NonRetryableError as e:
-        logger.error(f"Non-retryable error creating conversation: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Failed to create conversation: {str(e)}")
+        logger.error(f"Non-retryable error starting conversation: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to start conversation: {str(e)}")
     except Exception as e:
-        logger.error(f"Failed to create conversation after all retries: {str(e)}")
+        logger.error(f"Failed to start conversation after all retries: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to initialize chat session")
 
-    if not conversation.user:
+    if conversation.user_email != user_email:
         error_msg = f"User {user_email} not found in conversation"
         logger.error(error_msg)
         raise HTTPException(status_code=400, detail="User doesn't exist.")
@@ -109,7 +113,7 @@ async def chat_stream(
 
             inputs = {
                 "messages": [HumanMessage(content=user_message)],
-                "user_name": conversation.user.fullname.split(" ")[0],
+                "user_name": user.fullname.split(" ")[0],
                 "conversation_id": conversation.id,
             }
 
@@ -211,7 +215,7 @@ async def chat_stream(
                     )
                     error_payload = json.dumps({
                         "type": "error",
-                        "content": "Erro ao processar resposta. Tente novamente."
+                        "content": "Error processing response. Please try again."
                     })
                     yield f"data: {error_payload}\n\n"
                     continue
@@ -225,7 +229,7 @@ async def chat_stream(
             )
             error_payload = json.dumps({
                 "type": "error",
-                "content": "Erro ao processar sua solicitação. Nossa equipe foi notificada."
+                "content": "Critical error occurred. Our team has been notified."
             })
             yield f"data: {error_payload}\n\n"
             

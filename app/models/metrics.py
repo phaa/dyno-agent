@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import Integer, String, Float, DateTime, JSON, Boolean, func
@@ -62,6 +62,7 @@ class Metrics(Base):
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        server_default=func.now(),
-        index=True
+        default=lambda: datetime.now(timezone.utc), 
+        index=True,
+        nullable=False
     )

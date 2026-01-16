@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Literal
 
@@ -7,7 +8,7 @@ from sqlalchemy import String, Text, Integer, ForeignKey, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.db import Base
-from .user import User
+from models.user import User
 
 
 class Conversation(Base):
@@ -15,7 +16,8 @@ class Conversation(Base):
 
     id: Mapped[str] = mapped_column(
         String,
-        primary_key=True
+        primary_key=True,
+        default=lambda: str(uuid.uuid4())
     )
 
     user_email: Mapped[str] = mapped_column(
@@ -43,7 +45,11 @@ class Conversation(Base):
         cascade="all, delete-orphan"
     )
 
-    user: Mapped[User] = relationship()
+    """
+    Configures the relationship loading strategy as explicit selection.
+    Use selectinload() in queries when this relationship is needed.
+    """
+    user: Mapped[User] = relationship(lazy="raise")
 
 
 class Message(Base):

@@ -16,6 +16,7 @@ alembic
 asyncpg
 pytest
 pytest-asyncio
+python-json-logger
 
 # Google AI Studio
 langchain-google-genai

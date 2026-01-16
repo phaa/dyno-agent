@@ -1,11 +1,19 @@
 import logging
 from langchain_core.messages import AIMessage
 from langgraph.graph import END
-from ..state import GraphState, RetryableException, FatalException
+from ..state import GraphState
+from .config import should_summarize
 
 logger = logging.getLogger(__name__)
 
 # Routers (branching logic)
+def route_from_summarize(state: GraphState) -> str:
+    messages = state.get("messages", [])
+    if should_summarize(messages):
+        return "summarize"
+    return "llm"  
+
+
 def route_from_llm(state: GraphState):
     """Routing with error handling after LLM processing.
     
@@ -40,13 +48,6 @@ def route_from_llm(state: GraphState):
         return "tools"
     
     return END
-
-
-def check_db(state: GraphState):
-    """Decide whether to continue to summarize or terminate if DB is unavailable."""
-    # For now, we'll assume DB is available and let individual tools handle DB errors
-    # This is the entry point check - we can add actual DB connectivity check here
-    return "summarize"
 
 
 def db_disabled_node(state: GraphState) -> GraphState:

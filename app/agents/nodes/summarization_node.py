@@ -6,8 +6,7 @@ from ..state import GraphState
 from .config import (
     SUMMARY_PROMPT, 
     INITIAL_SUMMARY, 
-    get_summary_llm, 
-    should_summarize
+    get_summary_llm,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,14 +25,12 @@ async def summarization_node(state: GraphState):
     latency, and checkpointer I/O overhead within the PostgreSQL backend.
 
     Operational Logic:
-    1.  Trigger Mechanism: Evaluates the current message stack against pre-defined thresholds 
-        (message count or token density).
-    2.  State Consolidation: Orchestrates an LLM chain to merge the existing `summary` with 
+    1.  State Consolidation: Orchestrates an LLM chain to merge the existing `summary` with 
         new `messages` into a refined JSON schema (Decisions, Constraints, Tasks, Context).
-    3.  Checkpointer Optimization (Pruning): Generates `RemoveMessage` instructions for all 
+    2.  Checkpointer Optimization (Pruning): Generates `RemoveMessage` instructions for all 
         processed messages. This signals the `AsyncPostgresSaver` to exclude these message 
         IDs from the active state in subsequent checkpoints.
-    4.  State Re-entry: Injects a `SystemMessage` with the `[CONVERSATION_SUMMARIZED]` tag, 
+    3.  State Re-entry: Injects a `SystemMessage` with the `[CONVERSATION_SUMMARIZED]` tag, 
         ensuring downstream nodes operate on a high-signal, low-noise context.
 
     Infrastructure Impact:
@@ -62,9 +59,6 @@ async def summarization_node(state: GraphState):
     messages = state.get("messages", [])
     summary = state.get("summary", INITIAL_SUMMARY)
     conversation_id = state.get("conversation_id", "unknown")
-    
-    if not should_summarize(messages):
-        return state # No summarization needed, continue the flow
     
     logger.info(f"Summarizing {len(messages)} messages")
     
@@ -107,4 +101,4 @@ async def summarization_node(state: GraphState):
                 "node": "summarization_node"
             }
         )
-        return state # Fail safe - preserve original state
+        return {} # Fail safe - preserve original state

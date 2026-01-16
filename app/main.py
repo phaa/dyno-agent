@@ -1,21 +1,18 @@
 import logging
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
+from core.logging import setup_logging
 from core.db import DATABASE_URL_CHECKPOINTER
 from exceptions import ValidationError, validation_exception_handler
 from routers import allocation, auth, chat, health, metrics, admin
 from middleware.rate_limit import limiter, custom_rate_limit_exceeded
 
-logging.basicConfig(level=logging.DEBUG)
-logging.getLogger("langchain").setLevel(logging.DEBUG)
-
-logger = logging.getLogger(__name__)
-
+# Setup logging once at startup
+setup_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -755,10 +755,10 @@ async def build_graph(checkpointer: AsyncPostgresSaver) -> StateGraph:
     builder.add_node("error_handler", graceful_error_handler) # Node for graceful error handling
 
     # ---- Entry Point ----
-    builder.set_entry_point("check_db")
+    #builder.set_entry_point("summarize_if_needed")
 
-    # ---- Conditional Edges ----
-    builder.add_conditional_edges("check_db", check_db) # summarize or db_disabled based on DB availability
+    # ---- Edges ----
+    builder.add_conditional_edges(START, route_from_summarize)  # start → summarize or llm
     builder.add_edge("summarize", "llm")
     builder.add_conditional_edges("llm", route_from_llm)  # tools, error_handler, get_schema, or END
     builder.add_edge("get_schema", "tools") # after schema fetch, execute tools
@@ -1035,6 +1035,68 @@ def get_summary_llm():
 ---
 
 ## Database Architecture
+
+### ER Diagram
+
+```mermaid
+erDiagram
+    USERS ||--o{ USER_ROLE : assigns
+    ROLES ||--o{ USER_ROLE : assigned_to
+    ROLES ||--o{ ROLE_PERMISSION : has
+    PERMISSIONS ||--o{ ROLE_PERMISSION : grants
+    USERS ||--o{ CONVERSATIONS : owns
+    CONVERSATIONS ||--o{ MESSAGES : contains
+    VEHICLES ||--o{ ALLOCATIONS : booked_for
+    DYNOS ||--o{ ALLOCATIONS : scheduled_on
+    USERS ||--o{ METRICS : recorded_for
+
+    USERS {
+        string email PK
+        string fullname
+    }
+    ROLES {
+        int id PK
+        string name
+    }
+    PERMISSIONS {
+        int id PK
+        string name
+    }
+    USER_ROLE {
+        string user_email FK
+        int role_id FK
+    }
+    ROLE_PERMISSION {
+        int role_id FK
+        int permission_id FK
+    }
+    CONVERSATIONS {
+        string id PK
+        string user_email FK
+    }
+    MESSAGES {
+        int id PK
+        string conversation_id FK
+    }
+    VEHICLES {
+        int id PK
+        string vin
+    }
+    DYNOS {
+        int id PK
+        string name
+    }
+    ALLOCATIONS {
+        int id PK
+        int vehicle_id FK
+        int dyno_id FK
+    }
+    METRICS {
+        string id PK
+        int user_id FK
+        string correlation_id
+    }
+```
 
 ### Environment Detection & Database Configuration
 
@@ -2080,7 +2142,23 @@ resource "aws_db_instance" "postgres" {
 
 ---
 
-## Monitoring & Observability
+## Observability & Logging Architecture
+
+### Centralized Logging Strategy (ECS + CloudWatch)
+While custom business metrics are handled via a hybrid Boto3/S3 strategy, application-level observability is powered by a **Non-blocking JSON Logging** architecture.
+
+#### Architectural Implementation:
+- **Standard Output (stdout) Redirection**: Instead of writing to physical files (anti-pattern in ephemeral containers), the application emits logs to `stdout`. The **Amazon ECS `awslogs` log driver** intercepts these streams.
+- **Structured JSON Logging**: We utilize `python-json-logger` to format every log entry as a structured JSON object. This allows **CloudWatch Logs Insights** to parse fields (like `conversation_id`, `node_name`, and `latency`) as first-class citizens for indexing and querying.
+- **Log Level Hierarchy**: To optimize costs and signal-to-noise ratio:
+    - `INFO`: Application logic, LangGraph node transitions, and summarization triggers.
+    - `WARNING`: Third-party SDKs (`boto3`, `httpx`, `asyncpg`) to suppress heartbeat and transport-level noise.
+    - `ERROR`: Full stack traces and failure contexts.
+
+#### Infrastructure Benefits:
+1. **O(1) Searchability**: Engineers can query `filter @message like /error/` across thousands of containers in seconds.
+2. **Cost Efficiency**: By setting retention policies (e.g., 14 days) and utilizing JSON, we minimize storage costs while maximizing debug capability.
+3. **Correlation IDs**: Every log entry within a graph execution is tagged with a `conversation_id`, enabling end-to-end tracing of a single user request across the distributed system.
 
 ### Why Multi-Backend Monitoring Strategy?
 
@@ -2095,6 +2173,7 @@ resource "aws_db_instance" "postgres" {
 - **Prometheus + Grafana**: ~$50/month (ECS + EFS costs)
 - **CloudWatch Only**: ~$1,500/month (high-frequency metrics)
 - **Hybrid**: ~$200/month (CloudWatch for enterprise + Prometheus for operations)
+>Note on AI Observability: While CloudWatch handles infrastructure logs, LangSmith is integrated as a specialized tier for LLM trace auditing and prompt engineering, ensuring that developer-focused AI metrics do not inflate infrastructure monitoring costs.
 
 **Why Not Single Solution**:
 - **Prometheus Only**: No enterprise integration, limited AWS native features

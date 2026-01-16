@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import (
     Integer,
@@ -15,8 +15,10 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.db import Base
-from .vehicle import Vehicle
-from .dyno import Dyno
+
+if TYPE_CHECKING:
+    from models.vehicle import Vehicle
+    from models.dyno import Dyno
 
 
 class Allocation(Base):
@@ -71,11 +73,11 @@ class Allocation(Base):
         server_default=func.now()
     )
 
-    vehicle: Mapped[Vehicle] = relationship(
+    vehicle: Mapped["Vehicle"] = relationship(
         back_populates="allocations"
     )
 
-    dyno: Mapped[Dyno | None] = relationship(
+    dyno: Mapped["Dyno | None"] = relationship(
         back_populates="allocations"
     )
 

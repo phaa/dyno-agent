@@ -23,7 +23,7 @@ class ChatRequest(BaseModel):
 
         # Prevent SQL injection patterns
         sql_patterns = [
-            r"(?i)(drop|delete|truncate|union|select).*(?i)(from|where)",
+            r"(?i)(drop|delete|truncate|union|select).*(from|where)",
             r"(?i)execute\s*\(",
         ]
         for pattern in sql_patterns:

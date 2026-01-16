@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from auth.auth_handler import sign_jwt
+from auth.auth_handler import create_acess_token
 from auth.passwords_handler import hash_password_async, verify_password_async
 from models.user import User
 from core.db import get_db
@@ -43,7 +43,7 @@ async def register_user(user: UserSchema, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=409, detail="Email already registered.")
 
     # return token after successful commit
-    return sign_jwt(user.email)
+    return await create_acess_token(user.email, roles=[role.name for role in new_user.roles])
 
 
 @router.post("/login", tags=["auth"])
@@ -58,7 +58,7 @@ async def login_user(user: UserLoginSchema, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid password.")    
 
     # Generate JWT token
-    token = sign_jwt(existing_user.email)
+    token = await create_acess_token(existing_user.email, roles=[role.name for role in existing_user.roles])
     return token
 
 

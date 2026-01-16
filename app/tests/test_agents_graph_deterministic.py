@@ -136,8 +136,8 @@ async def test_graph_deterministic_tool_execution():
     # deterministic nodes
     fake_nodes = types.ModuleType('agents.nodes')
 
-    def check_db(state):
-        return 'summarize'
+    def route_from_summarize(state):
+        return 'llm'
 
     def summarization_node(state):
         return {'summary': 'deterministic-summary'}
@@ -165,7 +165,7 @@ async def test_graph_deterministic_tool_execution():
     def db_disabled_node(state):
         return {'db': 'disabled'}
 
-    fake_nodes.check_db = check_db
+    fake_nodes.route_from_summarize = route_from_summarize
     fake_nodes.summarization_node = make_coroutine(lambda s: summarization_node(s))
     fake_nodes.llm_node = make_coroutine(lambda s: llm_node(s))
     fake_nodes.route_from_llm = route_from_llm

@@ -1,7 +1,7 @@
 import os
 import jwt
 import time
-from typing import Dict, List
+from typing import List
 from fastapi import HTTPException, Request
 
 JWT_SECRET = os.getenv("JWT_SECRET")
@@ -34,7 +34,10 @@ async def create_acess_token(user_id: str, roles: List[str]) -> str:
         "exp": int(time.time()) + int(JWT_EXP_DELTA_SECONDS)
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    return token
+
+    return {
+        "access_token": token
+    }
 
 
 def decode_jwt(token: str) -> dict:

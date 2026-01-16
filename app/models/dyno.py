@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from  typing import TYPE_CHECKING
 from datetime import date
 
 from sqlalchemy import (
@@ -13,7 +13,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.db import Base
-from .allocation import Allocation
+
+# Avoid circular imports
+# We import Allocation only for type checking purposes
+if TYPE_CHECKING:
+    from models.allocation import Allocation
 
 
 class Dyno(Base):

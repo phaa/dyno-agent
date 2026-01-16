@@ -116,7 +116,7 @@ async def test_build_graph_compiles_and_invokes():
     fake_nodes.tool_node = make_coroutine_return({'tools': {}})
     fake_nodes.graceful_error_handler = make_coroutine_return({'error_handled': True})
     fake_nodes.route_from_llm = lambda state: [('tools', True)]
-    fake_nodes.check_db = lambda state: 'summarize'
+    fake_nodes.route_from_summarize = lambda state: 'llm'
 
     sys.modules['agents.nodes'] = fake_nodes
 

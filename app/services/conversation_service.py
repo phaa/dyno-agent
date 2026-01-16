@@ -2,6 +2,7 @@ import uuid
 import logging
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -89,7 +90,6 @@ class ConversationService:
 
             # Create a new conversation
             conv = Conversation(
-                id=str(uuid.uuid4()),
                 user_email=user_email,
                 title="New Chat"
             )
