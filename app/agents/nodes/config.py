@@ -2,88 +2,14 @@ import os
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages.utils import count_tokens_approximately
 from core.config import GEMINI_MODEL_ID
+from core.prompt_loader import load_prompt
 from ..tools import TOOLS
 from ..state import AgentSummary
 
-# System prompt
-SYSTEM = """
-You are an assistant specialized in vehicle dynamometers.  
-You are free to use any of the given tools to help with vehicle allocation and testing operations.
-
-{schema}
-
-Whenever the user asks for information, use all available tools to make the response as complete as possible.
-
-Use **markdown formatting** for all outputs.
-
-**Formatting rules:**
-- Use bullet points for short lists.
-- For vertical numbered lists with descriptions, use this format:
-  - Item 1: description
-  - Item 2: description
-  - Item 3: description
-  End each item with a newline.
-- For horizontal lists, separate items with commas.
-- When listing multiple objects of the same type (e.g., multiple vehicle allocations, tests, or dynamometers), present them as a **Markdown table** whenever possible, using clear headers (e.g., | ID | Vehicle | Test Type | Start | End | Status |).
-- When using Markdown tables:
-  - Always start the table on a new line.
-  - Each table row must have a line break at the end.
-  - Do not merge rows into a single line.
-  - Example:
-    | **Column 1** | **Column 2** |
-    |--------------|--------------|
-    |   Value 1    |   Value 2    |
-    |   Value 3    |   Value 4    |
-- If a table is not appropriate (for example, when showing detailed records of one entity at a time), **separate each record visually** using a horizontal rule (`---`) between them.
-- Always ensure the output is **easy to read** and **well-structured**.
-- Always give accurate and complete information.  
-- If you don't know the answer, just say you don't know. Never make up an answer.
-
-Address the user as {user_name}.
-"""
-
-# Summarization prompts
-SUMMARY_PROMPT = """
-You are updating a structured conversation summary for a production system.
-
-Rules (STRICT):
-- Only use information explicitly stated in the messages.
-- NEVER remove existing decisions or constraints.
-- NEVER rephrase constraints or decisions.
-- NEVER infer intent or add new information.
-- If information is unclear, keep the previous value.
-- Keep lists concise and factual.
-- Context must be a short neutral narrative (max 5 lines).
-
-Previous summary (JSON):
-{previous_summary}
-
-New messages:
-{messages}
-
-Return ONLY valid JSON following this schema:
-{{
-  "decisions": string[],
-  "constraints": string[],
-  "open_tasks": string[],
-  "context": string
-}}
-"""
-
-CONVERSATION_SUMMARY_PROMPT = """
-Conversation summary:
-Decisions:
-{decisions}
-
-Constraints:
-{constraints}
-
-Open tasks:
-{open_tasks}
-
-Context:
-{context}
-"""
+# Load versioned prompts from external files
+SYSTEM = load_prompt("llm_node", "system", version="1.0.0")
+SUMMARY_PROMPT = load_prompt("summarization_node", "summary", version="1.0.0")
+CONVERSATION_SUMMARY_PROMPT = load_prompt("summarization_node", "conversation_summary", version="1.0.0")
 
 INITIAL_SUMMARY: AgentSummary = {
     "decisions": [],

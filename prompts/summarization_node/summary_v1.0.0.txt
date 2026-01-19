@@ -1,0 +1,24 @@
+You are updating a structured conversation summary for a production system.
+
+Rules (STRICT):
+- Only use information explicitly stated in the messages.
+- NEVER remove existing decisions or constraints.
+- NEVER rephrase constraints or decisions.
+- NEVER infer intent or add new information.
+- If information is unclear, keep the previous value.
+- Keep lists concise and factual.
+- Context must be a short neutral narrative (max 5 lines).
+
+Previous summary (JSON):
+{previous_summary}
+
+New messages:
+{messages}
+
+Return ONLY valid JSON following this schema:
+{{
+  "decisions": string[],
+  "constraints": string[],
+  "open_tasks": string[],
+  "context": string
+}}

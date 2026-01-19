@@ -44,6 +44,46 @@ Dyno-Agent was designed to explicitly address these risks.
 
 ---
 
+## Project Ownership, Team Context & Development Workflow
+
+This repository represents an **independent, early-stage portfolio project**, developed and maintained **entirely by a single engineer**.
+
+Unlike my professional experience at Ford Motor Company — where I **led and collaborated with a multidisciplinary engineering team** — this project was intentionally built as a **solo effort**, outside of any corporate environment. Its purpose is to demonstrate **individual technical depth, architectural decision-making, and full end-to-end ownership**.
+
+### Team context clarification
+- No development team is involved in this project.
+- All system design, implementation, testing, infrastructure, and documentation decisions were made and executed independently.
+- The absence of a team in this repository does not reflect my professional background, but rather the scope and intent of this specific portfolio project.
+
+In corporate environments such as Ford, my responsibilities included:
+- Technical leadership and architectural guidance
+- Collaboration with cross-functional teams
+- Code reviews and pull request-based workflows
+- Task planning, prioritization, and delivery at scale
+
+### Development workflow disclaimer
+This project is currently in an **early-stage / pre-beta** phase.
+
+To prioritize delivery of a functional, end-to-end system within limited available time (typically 1–2 hours per day), the repository currently follows a **simplified Git workflow**, with most commits being pushed directly to the `main` branch.
+
+This approach was chosen intentionally:
+- The primary objective at this stage is to reach a **minimum complete and demonstrable system**, rather than simulate a multi-team workflow prematurely.
+- Strict feature-branch, integration-branch, and pull request processes would introduce overhead disproportionate to the current maturity and scope of a solo project.
+- Despite the simplified workflow, the system architecture, code organization, documentation, and testing strategy are designed following **production-oriented standards**.
+
+### Planned evolution
+Once the system reaches a stable baseline (beta milestone), the development process will transition to a more conventional workflow, including:
+- Feature branches
+- Pull requests
+- Code review gates
+- Semantic versioning and release tagging
+
+This progression reflects real-world engineering practice: process rigor increases as system maturity and collaboration needs grow.
+
+In a production or multi-contributor environment, a full GitFlow or trunk-based development model would be mandatory and is a workflow I regularly apply in professional settings.
+
+---
+
 ## System Architecture
 
 ```mermaid

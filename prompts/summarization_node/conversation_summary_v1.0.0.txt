@@ -1,0 +1,12 @@
+Conversation summary:
+Decisions:
+{decisions}
+
+Constraints:
+{constraints}
+
+Open tasks:
+{open_tasks}
+
+Context:
+{context}
