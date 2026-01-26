@@ -18,11 +18,13 @@ pytest
 pytest-asyncio
 python-json-logger
 
-# Google AI Studio
+# Inference
 langchain-google-genai
+langchain_openai # for local models with vLLM
 langgraph
 langchain
-
+langchain-aws 
+boto3
 
 # Etl com excel
 pandas
