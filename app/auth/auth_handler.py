@@ -9,14 +9,13 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
 JWT_EXP_DELTA_SECONDS = os.getenv("JWT_EXP_DELTA_SECONDS")
 
 
-async def create_acess_token(user_id: str, roles: List[str]) -> str:
+async def create_acess_token(user_id: str) -> str:
     """
     Create JWT with roles and permissions.
     
     Claims include:
     - sub: user ID (standard JWT)
     - email: user email
-    - roles: list of role names for client-side caching
     - session_id: unique for audit logging
     - iat/exp: standard timing
     
@@ -28,7 +27,6 @@ async def create_acess_token(user_id: str, roles: List[str]) -> str:
     payload = {
         "sub": user_id,
         "user_id": user_id,
-        "roles": roles,
         "session_id": f"{user_id}-{int(time.time())}",
         "iat": int(time.time()),
         "exp": int(time.time()) + int(JWT_EXP_DELTA_SECONDS)
