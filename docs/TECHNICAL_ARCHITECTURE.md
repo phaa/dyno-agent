@@ -835,61 +835,44 @@ async def auto_allocate_vehicle(...):
 
 ```mermaid
 flowchart TD
-    A["Tool Execution Output"] --> B["Summarization Node"]
-    B --> C{"Context Density<br/>Threshold Exceeded?"}
-    
-    C -->|"No (Skip)"| D["Preserve Full Context"]
-    C -->|"Yes (Trigger)"| E["LLM-Based Context<br/>Compression"]
-    
-    E --> F{"Schema Validation<br/>(Determinism Check)"}
-    F -->|"Invalid"| G["Fail-safe: Rollback to<br/>Original Messages"]
-    F -->|"Valid"| H["State Pruning:<br/>Generate RemoveMessage"]
-    
-    H --> I["Checkpointer Optimization<br/>(O(n) → O(1) State)"]
-    
-    G --> J["LLM Orchestrator Node"]
-    I --> J
-    D --> J
-    
-    J --> K["Inference Execution"]
-    K --> L{"State Error<br/>Detected?"}
-    
-    L -->|"Yes"| M{"Retry Budget<br/>Available?"}
-    L -->|"No"| N{"Tool Call<br/>Requested?"}
-    
-    M -->|"Yes"| O["Re-entry: Tool Retry"]
-    M -->|"No"| P["Exception Handler<br/>(Graceful Exit)"]
-    
-    N -->|"Yes"| Q{"Data Retrieval<br/>Required?"}
-    N -->|"No"| R["Terminator (END)"]
-    
-    Q -->|"Yes"| S["Metadata/Schema<br/>Lookup"]
-    Q -->|"No"| T["Tool Dispatcher"]
-    
-    S --> T
-    O --> B
-    T --> B
-    P --> B
-    
-    style A fill:#e1f5fe,stroke:#01579b
-    style E fill:#fff3e0,stroke:#e65100
-    style I fill:#e8f5e8,stroke:#2e7d32
-    style G fill:#ffebee,stroke:#c62828
-    style J fill:#f3e5f5,stroke:#7b1fa2
-    style R fill:#eceff1,stroke:#455a64
+    START["START"] --> GET_SCHEMA["Get Schema<br/>(prefetch & cache)"]
+    GET_SCHEMA --> ROUTE_SCHEMA{"Summarization needed?"}
+
+    ROUTE_SCHEMA -->|"Yes"| SUMMARIZE["Summarization Node:<br/>LLM context compression"]
+    ROUTE_SCHEMA -->|"No"| LLM["LLM Node"]
+
+    SUMMARIZE --> LLM
+
+    LLM --> ROUTE_LLM{"AI message has tool calls?"}
+    ROUTE_LLM -->|"Yes"| TOOLS["Tools Node:<br/>retry + error tracking"]
+    ROUTE_LLM -->|"No"| END["END"]
+
+    TOOLS --> ROUTE_TOOLS{"Error present?"}
+    ROUTE_TOOLS -->|"Yes & retry_count>0"| TOOLS
+    ROUTE_TOOLS -->|"Yes & retries exhausted"| ERROR_LLM["Error LLM:<br/>user-facing failure"]
+    ROUTE_TOOLS -->|"No"| LLM
+
+    ERROR_LLM --> END
+
+    style START fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    style GET_SCHEMA fill:#b2dfdb,stroke:#00695c,stroke-width:2px
+    style ROUTE_SCHEMA fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style SUMMARIZE fill:#ffe0b2,stroke:#e65100
+    style LLM fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    style ROUTE_LLM fill:#ffccbc,stroke:#d84315,stroke-width:2px
+    style TOOLS fill:#bbdefb,stroke:#0d47a1,stroke-width:2px
+    style ROUTE_TOOLS fill:#ffccbc,stroke:#d84315
+    style ERROR_LLM fill:#ffebee,stroke:#c62828
+    style END fill:#eceff1,stroke:#455a64,stroke-width:2px
 ```
 
 **Enhanced Flow Explanation**:
-1. **Trigger Check**: After tool execution, system checks if summarization is needed
-2. **Threshold Logic**: Activates when conversation has ≥6 messages OR >1800 tokens
-3. **LLM Processing**: Gemini model creates structured summary with JsonOutputParser
-4. **Validation**: Ensures summary contains required fields (decisions, constraints, open_tasks, context)
-5. **Checkpointer Optimization**: Replaces entire message history with single summary marker
-6. **Enhanced Error Handling**: New error detection and retry logic
-7. **Retry Mechanism**: Automatic retry for transient failures with retry_count tracking
-8. **Graceful Recovery**: User-friendly error messages when retries are exhausted
-9. **Schema Loading**: Conditional schema loading only when query_database tool is needed
-10. **Fail-Safe**: On any failure, preserves original messages and continues normally
+1. **Schema Prefetch**: Always load and cache the DB schema once before reasoning.
+2. **Summarization Gate**: Only compress history when messages ≥10 or tokens >1800.
+3. **LLM Routing**: If the AI message includes tool calls, branch to tools; otherwise finish.
+4. **Tool Execution Loop**: Tools run with retryable vs fatal error tracking; successful runs return to LLM for another step.
+5. **Retry Handling**: While `retry_count` > 0, loop back to tools; when exhausted, route to `error_llm` for a user-friendly fail message.
+6. **Exit Path**: `error_llm` clears error state and ends the graph; normal completions exit directly after LLM when no tools are needed.
 
 ### Intelligent Summarization System
 

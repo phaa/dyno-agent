@@ -10,86 +10,50 @@ The LangGraph agent follows a sophisticated execution pattern with database avai
 
 ```mermaid
 flowchart TD
-    A["Tool Execution Completed"] --> B["Summarization Node"]
-    B --> C{"Messages ≥ 6 OR Tokens >1800?"}
-    
-    C -->|"No"| D["Continue to LLM (no summarization)"]
-    C -->|"Yes"| E["LLM Summarization"]
-    
-    E --> F{"Valid JSON schema?"}
-    F -->|"No"| G["Validation Failed Keep Original Messages"]
-    F -->|"Yes"| H["Create conversation summary"]
-    
-    H --> I["Checkpointer Replace 50+ messages -> 1"]
-    
-    G --> J["Return to LLM Node"]
-    I --> J
-    D --> J
-    
-    J --> K["LLM Processing"]
-    K --> L{"Error State<br/>Check?"}
-    
-    L -->|"Has Error"| M{"Retry Count<br/>> 0?"}
-    L -->|"No Error"| N{"Tool Calls are required?"}
-    
-    M -->|"Yes"| O["Retry Tools Node"]
-    M -->|"No"| P["Graceful Error Handler"]
-    
-    N -->|"Yes"| Q{"Query Database<br/>Tool?"}
-    N -->|"No"| R["END Conversation"]
-    
-    Q -->|"Yes"| S["Get Schema Node"]
-    Q -->|"No"| T["Tools Node"]
-    
-    S --> T
-    O --> B
-    T --> B
-    P --> B
-    
-    style A fill:#e1f5fe
-    style E fill:#fff3e0
-    style I fill:#e8f5e8
-    style G fill:#ffebee
-    style O fill:#f3e5f5
-    style P fill:#ffebee
-    style S fill:#e0f2f1
+    START["START"] --> GET_SCHEMA["Get Schema <br> (prefetch & cache)"]
+    GET_SCHEMA --> ROUTE_SCHEMA{"Summarization needed?"}
+
+    ROUTE_SCHEMA -->|"Yes"| SUMMARIZE["Summarization Node <br> (Context compression)"]
+    ROUTE_SCHEMA -->|"No"| LLM["LLM Node<br/>(Tool reasoning)"]
+
+    SUMMARIZE --> LLM
+
+    LLM --> ROUTE_LLM{"AI message has tool calls?"}
+    ROUTE_LLM -->|"Yes"| TOOLS["Tools Node <br> (Retry + error tracking)"]
+    ROUTE_LLM -->|"No"| END["END"]
+
+    TOOLS --> ROUTE_TOOLS{"Error present?"}
+    ROUTE_TOOLS -->|"Yes & retry_count>0"| TOOLS
+    ROUTE_TOOLS -->|"Yes & retries exhausted"| ERROR_LLM["Error LLM <br> (Graceful failure)"]
+    ROUTE_TOOLS -->|"No"| LLM
+
+    ERROR_LLM --> END
+
+    style START fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style GET_SCHEMA fill:#b2dfdb,stroke:#00695c,stroke-width:2px
+    style ROUTE_SCHEMA fill:#f1f8e9,stroke:#558b2f
+    style SUMMARIZE fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style LLM fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    style TOOLS fill:#e0f2f1,stroke:#00695c,stroke-width:2px
+    style ROUTE_TOOLS fill:#f1f8e9,stroke:#558b2f
+    style ERROR_LLM fill:#ffebee,stroke:#c62828,stroke-width:2px
+    style END fill:#eceff1,stroke:#455a64,stroke-width:2px
 ```
 
 ## Flow Components
 
-- **Summarization Node**  
-  Evaluates the conversation size (messages ≥ 6 or tokens > 1800) and determines whether context summarization is required before continuing execution.
-- **LLM Summarization**  
-  Generates a structured summary of the conversation when triggered, ensuring that essential context is preserved while reducing token usage.
-- **Validation & Checkpointer**  
-  Validates the JSON schema produced by the summarization step. When successful, replaces large message histories (50+ messages) with a single persisted summary using the checkpointer.
-- **LLM Node**  
-  Core reasoning engine of the agent.  
-  Responsible for deciding the next action based on the current context:
-  - Continue the conversation
-  - Request tool execution
-  - Handle error or retry states
-- **Tool Routing**  
-  Interprets the LLM output and determines whether:
-  - A tool call is required
-  - The conversation can be safely terminated
-  - A retry flow should be triggered
-- **Get Schema Node**  
-  Dynamically retrieves the database schema to enrich the LLM context before executing structured queries or database-related operations.
-- **Tools Node**  
-  Executes the agent’s specialized tools (e.g., database queries, external integrations, validations) and returns the results back to the LLM for further reasoning.
-- **Retry Handler**  
-  Manages retry attempts when tool execution fails, enforcing configured retry limits.
-- **Graceful Error Handler**  
-  Safely terminates the flow when no retries remain or an unrecoverable error occurs.
+- **Schema Prefetch**: `get_schema` runs once at start to cache DB schema
+- **Summarization Gate**: Only triggers when history ≥10 messages or >1800 tokens
+- **LLM Node**: Handles tool decisions; if no tool calls, flow ends
+- **Tools Node**: Executes 9 tools with retry/error tracking (`retry_count` max 2)
+- **Error LLM**: User-facing failure path when retries are exhausted
+- **db_disabled/error_handler**: Present for future routing but not wired in the current edges
 
----
-
-### Design Notes
-
-The agent follows a deterministic **LLM → Tools → LLM** loop, with context checkpointing and summarization to ensure stability, predictable cost, and protection against token overflow.  
-Tools are treated as controlled side effects, while the LLM remains the central orchestrator of the workflow.
-
+**Key Flow Improvements**:
+- Direct `tools → llm` prevents infinite loops
+- Dynamic re-checking handles multi-tool sequences
+- `<thinking>` tags stripped automatically
+- Single DB save at end prevents concurrent conflicts  
 
 ## Tool Inventory
 
