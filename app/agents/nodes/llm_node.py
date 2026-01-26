@@ -1,19 +1,25 @@
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, AIMessage
 from langgraph.config import get_stream_writer
-from ..state import GraphState
-from .config import (
-    SYSTEM, 
-    CONVERSATION_SUMMARY_PROMPT, 
-    INITIAL_SUMMARY, 
-    get_model_with_tools
-)
+from agents.state import GraphState
+from agents.tools import TOOLS
+from agents.llm_factory import LLMFactory
+from .config import SYSTEM
+from .utils import strip_thinking_tags
+
+llm_factory = LLMFactory(provider="bedrock")
+llm_with_tools = llm_factory.get_llm_with_tools(tools=TOOLS)
+
+""" import logging
+logging.basicConfig(level=logging.CRITICAL)
+
+logger = logging.getLogger(__name__) """
+
 
 async def llm_node(state: GraphState):
     """Main reasoning node with tool bindings."""
     writer = get_stream_writer()
     writer("🤖 Thinking...")
     
-    summary = state.get("summary", INITIAL_SUMMARY)
     user_name = state.get("user_name")
     schema = state.get("schema", "Database schema will be loaded when needed for queries.")
 
@@ -21,19 +27,14 @@ async def llm_node(state: GraphState):
         SystemMessage(
             content=SYSTEM.format(schema=schema, user_name=user_name)
         ),
-        SystemMessage(
-            content=CONVERSATION_SUMMARY_PROMPT.format(
-                decisions="\n".join(summary["decisions"]),
-                constraints="\n".join(summary["constraints"]),
-                open_tasks="\n".join(summary["open_tasks"]),
-                context=summary["context"]
-            )
-        )
     ]
     
     msgs.extend(state.get("messages", []))
-
-    model_with_tools = get_model_with_tools()
-    ai = await model_with_tools.ainvoke(msgs)
-
+    
+    ai = await llm_with_tools.ainvoke(msgs)
+    
+    # logger.critical(f"LLM Response: {ai.content}")
+    
     return {"messages": [ai]}
+
+

@@ -1,6 +1,6 @@
 from langgraph.graph import StateGraph
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from langgraph.constants import START
+from langgraph.constants import START, END
 from .state import GraphState
 from .nodes import (
     get_schema_node, 
@@ -8,9 +8,10 @@ from .nodes import (
     llm_node,
     tool_node,
     route_from_llm,
-    route_from_summarize,
+    route_from_schema,
+    route_from_tools,
     summarization_node,
-    graceful_error_handler,
+    error_llm
 )
 
 # ====================================
@@ -21,39 +22,27 @@ async def build_graph(checkpointer: AsyncPostgresSaver = None) -> StateGraph:
     """
     Builds the LangGraph for the dynamometer allocation agent.
     
-    Components:
-    - get_schema: Fetches DB schema dynamically when query_database tool is needed
-    - summarize: Summarizes messages and prepares context for LLM
-    - llm: Main processing with tool bindings and error routing
-    - tools: Execution of the 9 specialized agent tools with retry logic
-    - retry_tools: Retry mechanism for failed tool executions
-    - error_handler: Graceful error handling when retries are exhausted
-    - db_disabled: Fallback when database is unavailable
-    
-    Error Handling:
-    The graph includes comprehensive retry logic and error recovery:
-    - Automatic retry for transient failures (network, timeouts)
-    - Intelligent error classification (retryable vs fatal)
-    - Graceful degradation with user-friendly error messages
-    - Error state tracking and recovery mechanisms
-    
-    Main Loop:
-    The graph executes: should_summarize → summarize → llm → (get_schema if needed) → tools → summarize
-    until the LLM decides to finish (no tool calls).
-    
+    Execution flow:
+    1. START → get_schema: load and cache the database schema once per run.
+    2. route_from_schema: if history is heavy, go to summarize; otherwise go straight to llm.
+    3. summarize: compress/prune messages and return to llm with a summary marker.
+    4. llm: runs with tool bindings; if it emits tool calls → tools, else END.
+    5. tools: executes tools with retry/error tracking. Retryable errors decrement
+       retry_count and loop back; exhausted/fatal errors route to error_llm; success
+       routes back to llm for another reasoning step.
+    6. error_llm: crafts a user-facing failure message, clears error state, then END.
+
+    Components wired in the graph:
+    - get_schema, summarize, llm, tools, error_llm
+    - db_disabled and error_handler nodes are available for future routing but not
+      currently used in the edge definitions.
+
     Args:
-        checkpointer: AsyncPostgresSaver for state persistence.
-                     If None, uses InMemorySaver for development.
-    
+        checkpointer: AsyncPostgresSaver for state persistence; defaults to the
+            in-memory saver when None.
+
     Returns:
-        StateGraph: Compiled graph ready for execution with invoke/stream.
-        
-    Example:
-        graph = await build_graph(checkpointer)
-        result = await graph.ainvoke(
-            {"messages": [HumanMessage("Allocate AWD vehicle")]},
-            config={"configurable": {"thread_id": "user123"}}
-        )
+        StateGraph: Compiled graph ready for invoke/stream.
     """
     builder = StateGraph(GraphState)
 
@@ -63,21 +52,17 @@ async def build_graph(checkpointer: AsyncPostgresSaver = None) -> StateGraph:
     builder.add_node("db_disabled", db_disabled_node) # Node for handling empty/unreachable DB
     builder.add_node("llm", llm_node) # Node for LLM reasoning with tool bindings
     builder.add_node("tools", tool_node) # Node for tool execution with retry logic
-    builder.add_node("error_handler", graceful_error_handler) # Node for graceful error handling
-
-    # ---- Entry Point ----
-    #builder.set_entry_point("summarize_if_needed")
-
-    # ---- Edges ----
-    builder.add_conditional_edges(START, route_from_summarize)  # start → summarize or llm
-    builder.add_edge("summarize", "llm")
-    builder.add_conditional_edges("llm", route_from_llm)  # tools, error_handler, get_schema, or END
-    builder.add_edge("get_schema", "tools") # after schema fetch, execute tools
-    builder.add_edge("tools", "summarize") # summarize tools output and return to LLM
-
-    builder.add_edge("error_handler", "summarize") # error handler returns to conversation flow
+    builder.add_node("error_llm", error_llm)
     
-    # Enhanced flow: summarize → llm → (error handling/retry logic) → tools → summarize
+    # ---- Edges ----
+    # Add guardrail before get_schema
+    builder.add_edge(START, "get_schema")  # Prefetch schema once at start (cached)
+    builder.add_conditional_edges("get_schema", route_from_schema) # Schema loaded, proceed to summarize or llm
+    builder.add_edge("summarize", "llm") # After summarization (if needed) return to the LLM 
+    builder.add_conditional_edges("llm", route_from_llm)  # Check for tool calls or end conversation
+    builder.add_conditional_edges("tools", route_from_tools) # Handle retries/errors (if any) or LLM
+
+    builder.add_edge("error_llm", END) # Always after error LLM, end the flow
     
     # ---- Compile Graph ----
     graph = builder.compile(checkpointer=checkpointer)

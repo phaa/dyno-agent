@@ -182,7 +182,7 @@ async def query_database(sql: str):
     """
 
     writer = get_stream_writer()
-    writer("📊 Executing custom database query...")
+    writer("📊 Querying system informations")
 
     service = _get_service_from_runtime()
     return await service.query_database_core(sql=sql)

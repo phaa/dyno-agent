@@ -37,4 +37,4 @@ class GraphState(MessagesState):
     error: Optional[str]
     error_node: Optional[str]
     # DB schema info
-    schema: Optional[list[str]] = None
+    schema: Optional[dict]

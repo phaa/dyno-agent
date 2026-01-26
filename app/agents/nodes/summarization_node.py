@@ -2,14 +2,17 @@ import json
 import logging
 from langchain_core.messages import BaseMessage, SystemMessage, RemoveMessage
 from langchain_core.output_parsers import JsonOutputParser
-from ..state import GraphState
+from langgraph.config import get_stream_writer
+from agents.state import GraphState
+from agents.llm_factory import LLMFactory
 from .config import (
     SUMMARY_PROMPT, 
     INITIAL_SUMMARY, 
-    get_summary_llm,
 )
 
 logger = logging.getLogger(__name__)
+llm_factory = LLMFactory(provider="bedrock")
+summarization_llm = llm_factory.get_summary_llm()
 
 def format_messages(messages: list[BaseMessage]) -> str:
     return "\n".join(
@@ -62,13 +65,16 @@ async def summarization_node(state: GraphState):
     
     logger.info(f"Summarizing {len(messages)} messages")
     
+    writer = get_stream_writer()
+    writer(f"🤖 Summarizing {len(messages)} messages...")
+    
     prompt = SUMMARY_PROMPT.format(
         previous_summary=json.dumps(summary, ensure_ascii=False),
-        messages=format_messages(messages)
+        messages=format_messages(messages) 
     )
 
     try:
-        chain = get_summary_llm() | JsonOutputParser()
+        chain = summarization_llm | JsonOutputParser()
         new_summary = await chain.ainvoke(prompt)
         
         # Validate summary structure before committing
@@ -80,7 +86,7 @@ async def summarization_node(state: GraphState):
         
         # Checkpointer optimization: Replace all messages with single summary marker
         ids_to_delete = [m.id for m in messages if m.id]
-        if len(ids_to_delete) < len(messages):
+        if len(ids_to_delete) != len(messages):
             logger.warning(f"Some messages do not have ID and could not be removed from state in {conversation_id}")
 
         delete_messages = [RemoveMessage(id=mid) for mid in ids_to_delete]
@@ -89,7 +95,6 @@ async def summarization_node(state: GraphState):
         )
         
         return {
-            "summary": new_summary,
             "messages": delete_messages + [summary_marker]  # Single message for checkpointer efficiency
         }
         

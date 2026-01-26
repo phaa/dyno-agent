@@ -1,9 +1,10 @@
 import logging
 from langgraph.prebuilt import ToolNode
 
-from agents.exceptions import FatalException, RetryableException
-from ..state import GraphState
-from ..tools import TOOLS
+from services.exceptions import FatalException, RetryableException
+# from services.exceptions import InvalidQueryError # uncomment for error simulation
+from agents.state import GraphState
+from agents.tools import TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ async def tool_node(state: GraphState) -> GraphState:
     - Unknown Exceptions: Treated as retryable with caution
     
     Retry Logic:
+    - If coming form LLM detect remaining tool calls
     - Decrements retry_count on retryable errors
     - Preserves error context for debugging and user feedback
     - Resets error state on successful execution
@@ -34,7 +36,9 @@ async def tool_node(state: GraphState) -> GraphState:
         # Execute tools using base ToolNode
         result = await base_tool_node.ainvoke(state)
         
-        # Success: Clear any previous error state
+        # raise InvalidQueryError("Erro ao acessar o banco de dados de veiculos") # uncomment for error simulation
+        
+        # Clear any previous error state
         return {
             **result,
             "error": None,
