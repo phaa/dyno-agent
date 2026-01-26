@@ -94,7 +94,7 @@ graph TB
     API --> DB[(PostgreSQL Database)]
     
     Agent --> Tools[9 Specialized Tools]
-    Agent --> LLM[Gemini 2.5 Flash]
+    Agent --> LLM
     
     Tools --> Allocator[Smart Allocator]
     Tools --> Validator[Constraint Validator]
@@ -115,7 +115,7 @@ graph TB
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **AI Agent** | LangGraph + Gemini 2.5 | Conversational interface with tool orchestration |
+| **AI Agent** | LangGraph + LLM | Conversational interface with tool orchestration |
 | **Backend API** | FastAPI + SQLAlchemy 2.0 | Async REST API with ORM |
 | **Database** | PostgreSQL + Alembic | Relational data with migrations |
 | **Authentication** | JWT + bcrypt | Secure user management |
@@ -217,15 +217,20 @@ Two deployment paths: local development for feature testing, or full AWS infrast
 
 **For testing the system locally with Docker PostgreSQL:**
 
+#### LLM Providers (pick one)
+- **Local via vLLM**: run a local model server (e.g., Mixtral/Llama) and point the agent to its base URL.
+- **Google Gemini**: use the hosted Gemini APIs (requires `GEMINI_API_KEY`).
+- **Amazon Bedrock**: use Bedrock models (requires AWS credentials with Bedrock access).
+
 > **Note**: The commands below use local Docker containers and the `Makefile` for development convenience. In production, the system uses AWS RDS PostgreSQL and different operational procedures.
 
 #### Prerequisites
 - Docker & Docker Compose
 - Python 3.11+
 - PostgreSQL 15+ (via Docker)
-- **Gemini API key** (required)
+- **LLM provider**: choose one of the options above
 - **LangSmith API key** (optional - for AI observability)
-- **AWS credentials** (optional - for CloudWatch monitoring)
+- **AWS credentials** (required if using Bedrock; optional for CloudWatch monitoring)
 
 #### Quick Setup (Local Development)
 ```bash
@@ -235,10 +240,11 @@ cd dyno-agent
 
 # Environment setup
 cp .env.example .env
-# Edit .env with your API keys:
-# - GEMINI_API_KEY (required)
+# Edit .env with your provider of choice:
+# - Local vLLM: set the local inference URL
+# - GEMINI_API_KEY (if using Gemini)
+# - AWS credentials (if using Bedrock)
 # - LANGSMITH_API_KEY (optional)
-# - AWS credentials (optional)
 
 # Start all services (app + local PostgreSQL + monitoring)
 make run
@@ -525,6 +531,10 @@ make prometheus-url # http://localhost:9090
 
 ## Future Enhancements
 
+### In Progress
+- [x] **Golden Set for AI Evaluation**: Curated, domain-validated dataset for regression testing, prompt validation, and agent behavior 
+- [x] **Access Control & Audit**: Role-based access control (RBAC) with comprehensive audit logging and anomaly detection
+
 ### Completed Features
 - [x] **Comprehensive Test Suite**: Unit tests, agent workflow tests, integration tests with conftest fixtures
 - [x] **Advanced Monitoring**: CloudWatch dashboards, Prometheus metrics, Grafana dashboards
@@ -545,7 +555,7 @@ make prometheus-url # http://localhost:9090
 
 ### Planned Features
 - [ ] **Redis Caching**: Comprehensive caching strategy with Redis for reduced latency and resource usage.
-- [ ] **Golden Set for AI Evaluation**: Curated, domain-validated dataset for regression testing, prompt validation, and agent behavior evaluation.
+evaluation.
 - [ ] **Frontend Interface**: React/Vue.js web interface for non-technical users
 - [ ] **Advanced RAG System**: FAISS vector store for technical documentation search
 - [ ] **ECS Auto-scaling**: Dynamic scaling based on CPU/memory usage
@@ -558,12 +568,10 @@ make prometheus-url # http://localhost:9090
 
 ### Guardrails & Safety 🛡️
 - [ ] **Cost & Resource Control**: Token budgets, rate limiting, and execution timeouts to prevent abuse and cost overruns
-- [ ] **Input/Output Safety**: Schema validation, LLM response filtering, and tool call whitelisting
-- [ ] **Access Control & Audit**: Role-based access control (RBAC) with comprehensive audit logging and anomaly detection
+- [ ] **Input/Output Safety**: Schema validation, intent verification, LLM response filtering, and tool call whitelisting
 - [ ] **Compliance & Security**: Request signing, HIPAA/SOC2 audit trails, and agent loop protection
 
 ### Technical Debt
-- [ ] **WebSocket support**: Real-time updates for allocation changes
 - [ ] **Advanced caching layer**: Redis for performance optimization
 
 ---

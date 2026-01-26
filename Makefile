@@ -9,20 +9,23 @@ help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 run: ## Start all services (app + monitoring)
-	docker-compose up
+	docker compose up
 
 stop: ## Stop all services
-	docker-compose down
+	docker compose down
 
 build: ## Build all containers
-	docker-compose build
+	docker compose build
 
 clean: ## Clean containers and volumes
-	docker-compose down -v
+	docker compose down -v
 	docker system prune -f
 
 test:
 	docker compose exec fastapi pytest
+
+test-golden: ## Run golden set evaluation (local, no Docker required)
+	python eval/run_agent_golden.py
 
 db-shell:
 	docker compose exec db psql -U dyno_user -d dyno_db
@@ -34,22 +37,22 @@ migrate: ## Run database migrations
 	docker compose exec fastapi alembic upgrade head
 
 seed:
-	docker compose exec fastapi python scripts/seed_data.py
+	docker compose exec fastapi python scripts/etl_excel.py
 
 monitoring: ## Start only monitoring stack
-	docker-compose up -d prometheus grafana
+	docker compose up -d prometheus grafana
 
 logs: ## Show logs for all services
-	docker-compose logs -f
+	docker compose logs -f
 
 logs-app: ## Show logs for FastAPI app
-	docker-compose logs -f fastapi
+	docker compose logs -f fastapi
 
 logs-prometheus: ## Show Prometheus logs
-	docker-compose logs -f prometheus
+	docker compose logs -f prometheus
 
 logs-grafana: ## Show Grafana logs
-	docker-compose logs -f grafana
+	docker compose logs -f grafana
 
 metrics: ## Check metrics endpoint
 	curl -s http://localhost:8000/metrics/prometheus | head -20
@@ -63,7 +66,7 @@ prometheus-url: ## Show Prometheus URL
 	@echo "Prometheus URL: http://localhost:9090"
 
 status: ## Show status of all services
-	docker-compose ps
+	docker compose ps
 
 infra-init:
 	cd infra && terraform init
@@ -79,11 +82,11 @@ infra-destroy:
 
 validate: ## Validate service health (FastAPI, Prometheus, Grafana)
 	@echo "🔍 Validating service health..."
-	@docker-compose exec -T fastapi curl -f http://localhost:8000/health > /dev/null 2>&1 && \
+	@docker compose exec -T fastapi curl -f http://localhost:8000/health > /dev/null 2>&1 && \
 		echo "✅ FastAPI is healthy" || echo "❌ FastAPI is not healthy"
-	@docker-compose exec -T prometheus curl -f http://localhost:9090/-/healthy > /dev/null 2>&1 && \
+	@docker compose exec -T prometheus curl -f http://localhost:9090/-/healthy > /dev/null 2>&1 && \
 		echo "✅ Prometheus is healthy" || echo "❌ Prometheus is not healthy"
-	@docker-compose exec -T grafana curl -f http://localhost:3000/api/health > /dev/null 2>&1 && \
+	@docker compose exec -T grafana curl -f http://localhost:3000/api/health > /dev/null 2>&1 && \
 		echo "✅ Grafana is healthy" || echo "❌ Grafana is not healthy"
 	@echo "✅ All services validated!"
 

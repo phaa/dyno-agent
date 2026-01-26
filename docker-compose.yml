@@ -49,5 +49,32 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
       - ./monitoring/grafana/dashboards:/etc/grafana/dashboards
 
+  # vllm:
+  #   image: vllm/vllm-openai:latest
+  #   container_name: vllm
+  #   runtime: nvidia
+  #   environment:
+  #     - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+  #     - HF_HUB_OFFLINE=1
+  #   volumes:
+  #     - /home/pedro/.cache/huggingface:/root/.cache/huggingface
+  #   ports:
+  #     - "8001:8000"  # Use port 8001 when acessing locally to avoid conflict
+  #   command: >
+  #     Qwen/Qwen2.5-7B-Instruct-AWQ
+  #     --quantization awq_marlin
+  #     --gpu-memory-utilization 0.85
+  #     --max-model-len 8192
+  #     --max-num-seqs 8
+  #     --enable-auto-tool-choice
+  #     --tool-call-parser hermes
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             capabilities: [gpu]
+
+
 volumes:
   grafana-storage:
