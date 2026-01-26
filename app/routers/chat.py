@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.graph import build_graph
+from agents.nodes.utils import strip_thinking_tags
 from services.conversation_service import ConversationService
 from auth.auth_bearer import JWTBearer
 from auth.auth_handler import get_user_email_from_token
@@ -82,20 +83,23 @@ async def chat_stream(
         logger.error(error_msg)
         raise HTTPException(status_code=400, detail="User doesn't exist.")
 
+    # Capture conversation_id here to avoid lazy loading issues in the async generator
+    conversation_id = conversation.id
+
     async def event_generator() -> AsyncGenerator[str, None]:
         start_time = time.time()
         last_ai_message_id: str | None = None
         final_assistant_response: str | None = None
         
         try:
-            logger.info(f"Starting chat stream for user {user_email}, conversation {conversation.id}")
+            logger.info(f"Starting chat stream for user {user_email}, conversation {conversation_id}")
             
             # Initialize services with error handling
             try:
                 graph = await build_graph(checkpointer)
             except Exception as e:
                 logger.error(f"Failed to build graph: {str(e)}")
-                error_payload = json.dumps({"type": "error", "content": "Failed to initialize AI engine"})
+                error_payload = json.dumps({"type": "error", "content": "Failed to initialize AI engine"}, ensure_ascii=False)
                 yield f"data: {error_payload}\n\n"
                 yield "data: [DONE]\n\n"
                 return
@@ -103,7 +107,7 @@ async def chat_stream(
             # Save user message with error handling
             try:
                 await conv_service.save_message(
-                    conversation_id=conversation.id,
+                    conversation_id=conversation_id,
                     role="user",
                     content=user_message
                 )
@@ -114,12 +118,12 @@ async def chat_stream(
             inputs = {
                 "messages": [HumanMessage(content=user_message)],
                 "user_name": user.fullname.split(" ")[0],
-                "conversation_id": conversation.id,
+                "conversation_id": conversation_id,
             }
 
             config = {
                 "configurable": {
-                    "thread_id": f"{user_email}_{conversation.id}"
+                    "thread_id": f"{user_email}_{conversation_id}"
                 }
             }
 
@@ -140,18 +144,8 @@ async def chat_stream(
                         payload = json.dumps({
                             "type": "status",
                             "content": chunk
-                        })
-
-                        try:
-                            await conv_service.save_message(
-                                conversation_id=conversation.id,
-                                role="status",
-                                content=chunk,
-                            )
-                        except Exception:
-                            # Continue streaming even if status save fails
-                            pass
-                        
+                        }, ensure_ascii=False)
+                        # Don't save status messages to DB - too much I/O overhead
                         yield f"data: {payload}\n\n" 
                         continue
                     
@@ -188,22 +182,19 @@ async def chat_stream(
                         else:
                             response_text = msg.content
 
+                        # Strip thinking tags before sending to user
+                        response_text = strip_thinking_tags(response_text) if isinstance(response_text, str) else response_text
+                        
+                        # Skip if content is empty after stripping
+                        if not response_text or response_text.isspace():
+                            continue
+
                         final_assistant_response = response_text
                         
                         payload = json.dumps({
                             "type": "assistant",
                             "content": response_text
-                        })
-
-                        try:
-                            await conv_service.save_message(
-                                conversation_id=conversation.id,
-                                role="assistant",
-                                content=response_text,
-                            )
-                        except Exception:
-                            # Continue streaming even if message save fails
-                            pass
+                        }, ensure_ascii=False)
                         
                         yield f"data: {payload}\n\n"
                         
@@ -216,7 +207,7 @@ async def chat_stream(
                     error_payload = json.dumps({
                         "type": "error",
                         "content": "Error processing response. Please try again."
-                    })
+                    }, ensure_ascii=False)
                     yield f"data: {error_payload}\n\n"
                     continue
 
@@ -225,15 +216,29 @@ async def chat_stream(
             logger.error(
                 f"Critical error in chat stream: {str(e)}",
                 exc_info=True,
-                extra={"user_email": user_email, "conversation_id": conversation.id}
+                extra={"user_email": user_email, "conversation_id": conversation_id}
             )
             error_payload = json.dumps({
                 "type": "error",
                 "content": "Critical error occurred. Our team has been notified."
-            })
+            }, ensure_ascii=False)
             yield f"data: {error_payload}\n\n"
             
         finally:
+            # Save conversation at the end (single DB operation)
+            try:
+                if conversation and conv_service and final_assistant_response:
+                    await conv_service.save_message(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=final_assistant_response,
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Failed to save assistant response: {str(e)}",
+                    exc_info=False
+                )
+            
             # Track metrics if possible
             try:
                 if conversation and conv_service:
@@ -243,7 +248,7 @@ async def chat_stream(
                         user_message=user_message,
                         assistant_response=final_assistant_response,
                         user_email=user_email,
-                        conversation_id=conversation.id,
+                        conversation_id=conversation_id,
                         duration_ms=duration_ms,
                         tools_used=[]
                     )
@@ -258,7 +263,7 @@ async def chat_stream(
             duration_ms = (time.time() - start_time) * 1000
             logger.info(
                 f"Chat stream completed for user {user_email}",
-                extra={"duration_ms": duration_ms, "conversation_id": conversation.id}
+                extra={"duration_ms": duration_ms, "conversation_id": conversation_id}
             )
             
             # Always end the stream

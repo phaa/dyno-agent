@@ -21,17 +21,14 @@ async def register_user(user: UserSchema, db: AsyncSession = Depends(get_db)):
     if not user.email or not user.password or not user.fullname:
         raise HTTPException(status_code=400, detail="Missing user information.")
 
-    # Hash password
     hashed_password = await hash_password_async(user.password)
 
-    # Create new user
     new_user = User(
         email=user.email,
         fullname=user.fullname,
         password=hashed_password,  # In production, hash the password before storing
     )
 
-    # Add user to db    
     db.add(new_user)
     await db.flush() 
 
@@ -42,8 +39,7 @@ async def register_user(user: UserSchema, db: AsyncSession = Depends(get_db)):
         await db.rollback()
         raise HTTPException(status_code=409, detail="Email already registered.")
 
-    # return token after successful commit
-    return await create_acess_token(user.email, roles=[role.name for role in new_user.roles])
+    return await create_acess_token(user.email)
 
 
 @router.post("/login", tags=["auth"])
@@ -58,7 +54,7 @@ async def login_user(user: UserLoginSchema, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid password.")    
 
     # Generate JWT token
-    token = await create_acess_token(existing_user.email, roles=[role.name for role in existing_user.roles])
+    token = await create_acess_token(existing_user.email)
     return token
 
 
