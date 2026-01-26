@@ -328,10 +328,8 @@ class AllocationService:
                     a2.start_date.label("start2"),
                     a2.end_date.label("end2")
                 )
-                .select_from(
-                    a1.join(a2, a1.dyno_id == a2.dyno_id)
-                    .join(Dyno, Dyno.id == a1.dyno_id)
-                )
+                .join(a1, Dyno.id == a1.dyno_id)
+                .join(a2, a1.dyno_id == a2.dyno_id)
                 .where(
                     # Same dyno, different allocations
                     a1.id < a2.id,  # Avoid duplicates (a1 vs a2 and a2 vs a1)
