@@ -8,10 +8,7 @@ Usage:
     system_prompt = load_prompt("llm_node", "system", version="1.0.0")
     summary_prompt = load_prompt("summarization_node", "summary")  # defaults to 1.0.0
 """
-
-import os
 from pathlib import Path
-from typing import Optional
 
 
 def load_prompt(
@@ -37,7 +34,7 @@ def load_prompt(
         system_prompt = load_prompt("llm_node", "system")
         summary_prompt = load_prompt("summarization_node", "summary", version="1.0.0")
     """
-    prompt_dir = Path(__file__).parent.parent.parent / "prompts" / node_name
+    prompt_dir = Path(__file__).parent.parent / "prompts" / node_name # inside /app due to containerization
     prompt_file = prompt_dir / f"{prompt_name}_v{version}.txt"
     
     if not prompt_file.exists():

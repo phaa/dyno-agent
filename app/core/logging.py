@@ -17,7 +17,7 @@ def setup_logging():
         root_logger.removeHandler(handler)
 
     # 3. Create StreamHandler for stdout (Required for AWS ECS)
-    log_handler = logging.StreamHandler(sys.stdout)
+    """ log_handler = logging.StreamHandler(sys.stdout)
     
     # 4. Define JSON Format
     # CloudWatch Insights performs best when specific fields are extracted
@@ -26,7 +26,7 @@ def setup_logging():
         datefmt='%Y-%m-%dT%H:%M:%SZ'
     )
     log_handler.setFormatter(formatter)
-    root_logger.addHandler(log_handler)
+    root_logger.addHandler(log_handler) """
 
     # 5. Library-Specific Verbosity Management
     # High verbosity (INFO) for application logic and orchestration
