@@ -1,9 +1,10 @@
 import pytest
 from datetime import datetime, date
 from types import SimpleNamespace
-
 import sys
 import types
+
+import agents.tools as tools_module
 
 # Provide lightweight fakes for external AI libs to avoid importing heavy dependencies
 if 'langchain_core.tools' not in sys.modules:
@@ -29,8 +30,6 @@ if 'langgraph.config' not in sys.modules:
     lg_cfg = types.ModuleType('langgraph.config')
     lg_cfg.get_stream_writer = lambda: (lambda s: None)
     sys.modules['langgraph.config'] = lg_cfg
-
-import agents.tools as tools_module
 
 
 def test_get_datetime_now_calls_service():
