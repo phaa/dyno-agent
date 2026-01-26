@@ -153,11 +153,13 @@ async def load_forecast(file_path: str):
         print(f"Total allocations to add: {len(allocations)}")
         await session.commit()
 
-
-FILE_PATH = "CERT_FUEL BASELINE.xlsm"
+# This file is executed as a script and sees the app/ directory as root
+# Thats why we use scripts/etl_excel.py
+FILE_PATH = "scripts/CERT_FUEL BASELINE.xlsm"
 
 async def main():
-    #await load_dyno_rules(FILE_PATH)
+    # Make sure to execute this seed script only once to avoid duplications
+    await load_dyno_rules(FILE_PATH)
     await load_forecast(FILE_PATH)
 
 if __name__ == "__main__":
