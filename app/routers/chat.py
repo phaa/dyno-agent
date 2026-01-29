@@ -116,7 +116,8 @@ async def chat_stream(
                 # Continua mesmo se falhar, mas loga para auditoria
 
             inputs = {
-                "messages": [HumanMessage(content=user_message)],
+                #"messages": [HumanMessage(content=user_message)],
+                "user_input": user_message,
                 "user_name": user.fullname.split(" ")[0],
                 "conversation_id": conversation_id,
             }
@@ -288,6 +289,24 @@ async def get_conversation_metrics(hours: int = 24, db: AsyncSession = Depends(g
     return await metrics_tracker.get_conversation_stats(hours=hours)
 
 
+@router.get("/conversations", dependencies=[Depends(JWTBearer())], tags=["chat"])
+async def get_conversation_messages(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get messages from a specific conversation for the authenticated user."""
+    user_email = get_user_email_from_token(request)
+    conv_service = ConversationService(db=db)
+    
+    try:
+        conversations = await conv_service.get_conversations(user_email)
+    except Exception as e:
+        logger.error(f"Error retrieving conversations for user {user_email}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve conversations")
+    
+    return {"conversations": conversations}
+
+
 @router.get("/conversations/{conversation_id}/messages", dependencies=[Depends(JWTBearer())], tags=["chat"])
 async def get_conversation_messages(
     conversation_id: str, 
@@ -307,3 +326,5 @@ async def get_conversation_messages(
         raise HTTPException(status_code=404, detail="Conversation not found or access denied")
     
     return {"messages": messages}
+
+

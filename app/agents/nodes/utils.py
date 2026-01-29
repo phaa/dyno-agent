@@ -3,17 +3,22 @@ import logging
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.messages import AIMessage
 from langgraph.graph import END
-from ..state import GraphState
+from agents.state import GraphState
+from .config import INITIAL_SUMMARY
 
 logger = logging.getLogger(__name__)
 
 def should_summarize(messages: list) -> bool:
+    tokens_count = count_tokens_approximately(messages)
+    #logger.critical("Token count check for summarization: %d tokens", tokens_count)
     return (
         len(messages) >= 10 or
-        count_tokens_approximately(messages) > 1800
+        tokens_count > 8000
     )
     
 # Routers (branching logic)
+
+# Deprecated in favor of direct edge from get_schema to llm
 def route_from_schema(state: GraphState) -> str:
     """Routing after DB shema fetching.
     
@@ -26,10 +31,26 @@ def route_from_schema(state: GraphState) -> str:
     Returns:
         str: Next node name ('summarize', 'llm')
     """
-    messages = state.get("messages", [])
-    if should_summarize(messages):
-        return "summarize"
-    return "llm"  
+    
+    # Uncomment for detailed state logging
+    """ logger.critical("STATE SNAPSHOT")
+    for k, v in state.items():
+        if isinstance(v, list):
+            logger.critical("%s: %d items", k, len(v))
+        else:
+            logger.critical("%s: %s", k, type(v))
+            
+    
+    for m in state.get("messages", []):
+        logger.critical("MSG %s %s", m.type, len(m.content)) """
+    
+    error = state.get("error")
+    
+    if error:
+        logger.error(f"Error after schema fetch: {error}")
+        return "error_llm"
+    
+    return "llm"  # Proceed to LLM 
 
 
 def route_from_llm(state: GraphState):
@@ -37,17 +58,17 @@ def route_from_llm(state: GraphState):
     
     Routing Logic:
     1. Tool Calls: Routes to direct tool execution (schema always loaded at start)
-    2. No Tools: Ends conversation normally
+    2. No Tools: Routes to summarization for context management
      
     Returns:
-        str: Next node name ('tools', or END)
+        str: Next node name ('tools', or 'summarize')
     """ 
     
     last = state["messages"][-1]
     if isinstance(last, AIMessage) and last.tool_calls:
         # Schema is always loaded at start, so always route directly to tools
         return "tools"
-    return END
+    return "summarize"
 
 
 def route_from_tools(state: GraphState):
@@ -74,7 +95,7 @@ def route_from_tools(state: GraphState):
 
     return "llm"
 
-
+# Deprecated
 def db_disabled_node(state: GraphState) -> GraphState:
     """Handles the case where the database is empty or unreachable."""
     error_message = "Apparently our database is not configured. Aborting further operations"
@@ -120,6 +141,12 @@ def error_handler_node(state: GraphState) -> GraphState:
         "retry_count": 2  # Reset retry count for next operation
     }
 
+
+def cleanup_node(state: GraphState) -> GraphState:
+    """Clean up temporary fields from state to prevent leakage."""
+    return {
+        "summary": state.get("summary", INITIAL_SUMMARY)
+    }
 
 
 def strip_thinking_tags(content: str) -> str:

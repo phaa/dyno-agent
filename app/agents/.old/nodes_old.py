@@ -10,7 +10,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import get_runtime
-from langgraph.config import get_stream_writer
+from agents.stream_writer import get_stream_writer
 
 from .state import AgentSummary, GraphState 
 from .tools import (

@@ -1,6 +1,6 @@
 from sqlalchemy import text
 from langgraph.runtime import get_runtime
-from langgraph.config import get_stream_writer
+from agents.stream_writer import get_stream_writer
 from core.cache import schema_cache
 from agents.state import GraphState
 
@@ -34,20 +34,27 @@ async def get_schema_node(state: GraphState) -> GraphState:
         ORDER BY t.table_name, c.ordinal_position;
     """
     
-    result = await db.execute(text(sql_schema))
-    rows = result.fetchall()
-    
-    schema = {}
-    for table_name, column_name in rows:
-        if table_name not in schema:
-            schema[table_name] = []
-        schema[table_name].append(column_name)
+    try:
+        result = await db.execute(text(sql_schema))
+        rows = result.fetchall()
+        
+        schema = {}
+        for table_name, column_name in rows:
+            if table_name not in schema:
+                schema[table_name] = []
+            schema[table_name].append(column_name)
 
-    # Cache the result
-    schema_cache.set(schema)
-    
+        # Cache the result
+        schema_cache.set(schema)
+        return {
+            "schema": schema,
+        }
+    except Exception as e:
+        return {
+            "retry_count": 0,  # Force immediate error handling
+            "error": str(e),
+            "error_node": "get_schema_node"
+        }
     # logger.critical(schema)
 
-    return {
-        "schema": schema,
-    }
+    

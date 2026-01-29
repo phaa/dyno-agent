@@ -2,7 +2,6 @@ import os
 from langchain_openai import ChatOpenAI
 from langchain_aws import ChatBedrock
 from langchain_google_genai import ChatGoogleGenerativeAI
-from core.environment import is_local_inference
 from .config import (
     VLLM_URL, 
     LOCAL_MODEL_ID, 
@@ -14,7 +13,6 @@ from .config import (
 class LLMFactory:
     def __init__(self, provider: str = "bedrock"):
         self._provider = provider
-        self._is_local_inference = is_local_inference()
 
     # Clients
     @staticmethod
@@ -32,21 +30,19 @@ class LLMFactory:
             config=config,
         )
 
-    # Local
-    def _local_llm(self, temperature: float, max_tokens: int):
-        return ChatOpenAI(
-            model=LOCAL_MODEL_ID,
-            base_url=VLLM_URL,
-            api_key="not-needed",
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=60,
-            max_retries=2,
-        )
-
     # Remote 
-    def _remote_llm(self, temperature: float, max_tokens: int):
-        if self._provider == "bedrock":
+    def _setup_llm(self, temperature: float, max_tokens: int):
+        if self._provider == "local":
+            return ChatOpenAI(
+                model=LOCAL_MODEL_ID,
+                base_url=VLLM_URL,
+                api_key="not-needed",
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=60,
+                max_retries=2,
+            )
+        elif self._provider == "bedrock":
             return ChatBedrock(
                 model_id=BEDROCK_MODEL_ID,
                 region_name=AWS_REGION,
@@ -56,8 +52,7 @@ class LLMFactory:
                     "max_tokens": max_tokens,
                 },
             )
-
-        if self._provider == "gemini":
+        elif self._provider == "gemini":
             return ChatGoogleGenerativeAI(
                 model=GEMINI_MODEL_ID,
                 api_key=os.getenv("GEMINI_API_KEY"),
@@ -71,28 +66,28 @@ class LLMFactory:
 
     # Public API 
     def get_llm(self):
-        if self._is_local_inference:
-            return self._local_llm(
+        if self._provider == "local":
+            return self._setup_llm(
                 temperature=0.5,
                 max_tokens=1024,
             )
 
-        return self._remote_llm(
+        return self._setup_llm(
             temperature=0.0,
-            max_tokens=400,
+            max_tokens=1024,
         )
 
     def get_summary_llm(self):
-        if self._is_local_inference:
+        if self._provider == "local":
             # vLLM forces tool calling, so disable tools explicitly for summarization case
-            return self._local_llm(
+            return self._setup_llm(
                 temperature=0.0,
                 max_tokens=400,
             ).bind_tools([])
 
-        return self._remote_llm(
-            temperature=0.5,
-            max_tokens=1024,
+        return self._setup_llm(
+            temperature=0.0,
+            max_tokens=400,
         )
 
     def get_llm_with_tools(self, tools: list):

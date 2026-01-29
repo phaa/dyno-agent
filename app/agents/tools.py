@@ -1,8 +1,8 @@
 from datetime import date
 from langchain_core.tools import tool
 from langgraph.runtime import get_runtime
-from langgraph.config import get_stream_writer
 from services.allocation_service import AllocationService
+from .stream_writer import get_stream_writer
 
 
 # ---------------------------------------
@@ -30,10 +30,16 @@ def _get_service_from_runtime():
 @tool
 def get_datetime_now():
     """
-    Gets the current date and time when needed.
+    Use this tool when the user asks about:
+    - Today's date
+    - The current day or time
+    - "Now", "today", "current date", or time-based reasoning
+
+    This tool should be used instead of assuming or hallucinating dates.
 
     Returns:
-        The current date and time in YYYY-MM-DD HH:MM:SS format.
+        A string with the current date and time in format:
+        YYYY-MM-DD HH:MM:SS
     """
     service = _get_service_from_runtime()
     return service.get_datetime_now_core()
@@ -46,18 +52,23 @@ def get_datetime_now():
 @tool
 async def find_available_dynos(start_date: date, end_date: date, weight_lbs: int, drive_type: str, test_type: str):
     """
-    Finds available dynos for a vehicle test within a specified date range
-    and technical compatibility.
+    Use this tool when the user wants to:
+    - Find available dynos for a new test
+    - Check which dynos can run a test in a given date range
+    - Ask questions like:
+        * "Which dynos are available?"
+        * "Can I schedule a test between X and Y?"
+        * "What dynos support this vehicle?"
 
-    Args:
-        start_date: Requested start date for the test
-        end_date: Requested end date for the test
-        weight_lbs: Vehicle weight in pounds
-        drive_type: Vehicle drive type (e.g., 'AWD', '2WD')
-        test_type: Type of test required (e.g., 'AWD', '2WD', 'brake')
+    Do NOT use this tool to allocate or book a dyno.
+    This tool is read-only and does not create allocations.
 
     Returns:
-        A list of the available dynos.
+        A list of available dynos that match:
+        - Date availability
+        - Vehicle weight
+        - Drive type (AWD / 2WD)
+        - Test type
     """
     
     writer = get_stream_writer()
@@ -76,13 +87,19 @@ async def find_available_dynos(start_date: date, end_date: date, weight_lbs: int
 @tool
 async def check_vehicle_allocation(vehicle_id: int):
     """
-    Checks whether a specific vehicle is already allocated to a dyno.
+    Use this tool when the user asks:
+    - If a vehicle is already scheduled
+    - Whether a vehicle has an existing dyno allocation
+    - To check conflicts before booking another test
 
-    Args:
-        vehicle_id: The ID of the vehicle
+    Typical questions:
+    - "Is vehicle 77 already scheduled?"
+    - "Does this car have any allocations?"
+    - "Show me current bookings for this vehicle"
 
     Returns:
-        A list of strings describing allocations of the specified vehicle.
+        A list describing current or past allocations for the vehicle.
+        If none exist, returns an explicit 'no allocations found' message.
     """
 
     writer = get_stream_writer()
@@ -96,10 +113,19 @@ async def check_vehicle_allocation(vehicle_id: int):
 @tool
 async def detect_conflicts():
     """
-    Detects overlapping dyno allocations (conflicts) across all dynos.
+    Use this tool when the user wants to:
+    - Detect scheduling conflicts
+    - Check overlapping dyno bookings
+    - Audit the system for allocation issues
+
+    Typical questions:
+    - "Are there any conflicts?"
+    - "Do we have overlapping dyno schedules?"
+    - "Is anything double-booked?"
 
     Returns:
-        A list of conflict dictionaries, or a message if no conflicts are found.
+        A list of detected conflicts with dyno, dates, and vehicles,
+        or a message stating that no conflicts were found.
     """
 
     writer = get_stream_writer()
@@ -112,10 +138,17 @@ async def detect_conflicts():
 @tool
 async def completed_tests_count():
     """
-    Counts the number of completed vehicle tests.
+    Use this tool when the user asks for:
+    - Metrics or statistics
+    - How many tests have been completed
+    - System-level KPIs
+
+    Typical questions:
+    - "How many tests are completed?"
+    - "Total number of finished tests?"
 
     Returns:
-        Integer: number of completed tests.
+        An integer representing the number of completed tests.
     """
 
     writer = get_stream_writer()
@@ -128,13 +161,22 @@ async def completed_tests_count():
 @tool
 async def get_tests_by_status(status: str):
     """
-    Retrieves vehicle tests by their test status.
+    Use this tool when the user wants to list tests by status.
 
-    Args:
-        status: test status (e.g., 'completed', 'running', 'scheduled')
+    Valid statuses include:
+    - completed
+    - running
+    - scheduled
+
+    Typical questions:
+    - "Show me all running tests"
+    - "Which tests are scheduled?"
+    - "List completed tests"
+
+    Prefer this tool over direct SQL queries when filtering by status.
 
     Returns:
-        A list of allocations.
+        A list of tests matching the requested status.
     """
 
     writer = get_stream_writer()
@@ -147,12 +189,18 @@ async def get_tests_by_status(status: str):
 @tool
 async def maintenance_check():
     """
-    Checks which dynos are currently unavailable due to maintenance 
-    or scheduled downtime.
+    Use this tool when the user asks about:
+    - Dyno availability due to maintenance
+    - Downtime or temporarily unavailable dynos
+
+    Typical questions:
+    - "Are any dynos under maintenance?"
+    - "Why is dyno X unavailable?"
+    - "Which dynos are down today?"
 
     Returns:
-        A list of strings describing dynos unavailable today,
-        or a message if all are available.
+        A list of dynos currently unavailable due to maintenance,
+        or a message indicating all dynos are operational.
     """
 
     writer = get_stream_writer()
@@ -169,8 +217,7 @@ async def query_database(sql: str):
 
     - This is the agent's generic query mechanism.
     - Only SELECT statements are allowed.
-    - Last resort for complex data retrieval needs.
-    - Avoid queries without where clauses.
+    - Avoid queries without where clauses and limit clauses.
 
     Args:
         sql (str): A SQL SELECT statement to execute.
@@ -182,7 +229,7 @@ async def query_database(sql: str):
     """
 
     writer = get_stream_writer()
-    writer("📊 Querying system informations")
+    writer(f"📊 Querying system informations with SQL: {sql}")
 
     service = _get_service_from_runtime()
     return await service.query_database_core(sql=sql)
@@ -198,22 +245,28 @@ async def auto_allocate_vehicle(
     max_backup_days: int = 7
 ):
     """
-    Automatically allocates optimal dyno with:
-    - Multi-dimensional compatibility matching
-    - Concurrency control (FOR UPDATE locks)
-    - Intelligent backup date selection
-    - Real-time conflict detection
+    Use this tool ONLY when the user explicitly wants to:
+    - Book
+    - Allocate
+    - Schedule a vehicle on a dyno
 
-    Args:
-        vehicle_id: Existing vehicle ID (preferred)
-        vin: Alternative identifier
-        start_date: Requested start date (datetime.date)
-        days_to_complete: Duration in days
-        backup: If true, attempts subsequent days up to max_backup_days
-        max_backup_days: Number of future days to try when backup=True
+    This tool performs a real allocation and modifies system state.
+
+    Typical user intents:
+    - "Schedule this vehicle"
+    - "Book a dyno"
+    - "Automatically allocate a test"
+    - "Find and reserve the best dyno"
+
+    If the user is only asking questions or exploring options,
+    use read-only tools instead.
 
     Returns:
-        dict: { "success": bool, "message": str, "allocation": {...} }
+        {
+          "success": boolean,
+          "message": explanation of the result,
+          "allocation": allocation details (if successful)
+        }
     """
 
     writer = get_stream_writer()

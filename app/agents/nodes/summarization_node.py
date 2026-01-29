@@ -1,10 +1,11 @@
 import json
 import logging
-from langchain_core.messages import BaseMessage, SystemMessage, RemoveMessage
-from langchain_core.output_parsers import JsonOutputParser
-from langgraph.config import get_stream_writer
+from langchain_core.messages import BaseMessage, AIMessage, RemoveMessage
+from langchain_core.output_parsers import PydanticOutputParser
+from agents.stream_writer import get_stream_writer
 from agents.state import GraphState
 from agents.llm_factory import LLMFactory
+from agents.schemas import ConversationSummary
 from .config import (
     SUMMARY_PROMPT, 
     INITIAL_SUMMARY, 
@@ -21,89 +22,66 @@ def format_messages(messages: list[BaseMessage]) -> str:
 
 async def summarization_node(state: GraphState):
     """
-    Performs structured state compression and history pruning to optimize context window and persistence.
+    Consolidates conversation history into a structured summary to optimize token usage and state persistence.
 
-    This node implements a "Garbage Collection" strategy for the conversation state. It prevents 
-    unbounded growth of the message history, which directly impacts LLM token costs, inference 
-    latency, and checkpointer I/O overhead within the PostgreSQL backend.
+    This node implements an LLM-driven compression strategy that merges the existing `summary` with 
+    new `turn_messages` into a refined JSON schema (Decisions, Constraints, Tasks, Context). This 
+    approach prevents unbounded growth of the message history, reducing LLM token costs, inference 
+    latency, and database I/O overhead in the PostgreSQL backend.
 
     Operational Logic:
-    1.  State Consolidation: Orchestrates an LLM chain to merge the existing `summary` with 
-        new `messages` into a refined JSON schema (Decisions, Constraints, Tasks, Context).
-    2.  Checkpointer Optimization (Pruning): Generates `RemoveMessage` instructions for all 
-        processed messages. This signals the `AsyncPostgresSaver` to exclude these message 
-        IDs from the active state in subsequent checkpoints.
-    3.  State Re-entry: Injects a `SystemMessage` with the `[CONVERSATION_SUMMARIZED]` tag, 
-        ensuring downstream nodes operate on a high-signal, low-noise context.
+    1.  Summary Consolidation: Orchestrates an LLM chain to merge the current `summary` with 
+        the `turn_messages` (messages from the current conversation turn) into a structured 
+        `ConversationSummary` object.
+    2.  Validation: Uses `PydanticOutputParser` for automatic schema validation and error recovery.
+    3.  State Update: Returns an updated state with the consolidated summary for downstream nodes.
 
     Infrastructure Impact:
-    - PostgreSQL Efficiency: By pruning messages, the serialized state size is reduced from 
-      O(n) to O(1) relative to the pruned history, preventing database bloat and reducing 
-      deserialization latency during state recovery.
-    - Determinism: Ensures the GraphState remains within the LLM's optimal performance 
-      window, mitigating "lost-in-the-middle" retrieval issues.
+    - Efficiency: Reduces the effective conversation history size from O(n) to O(1), preventing 
+      state bloat and reducing deserialization latency during state recovery.
+    - Determinism: Keeps the GraphState within the LLM's optimal performance window, mitigating 
+      "lost-in-the-middle" retrieval issues.
 
     Error Handling & Resiliency:
-    - Fault Tolerance: On LLM or Parsing failures, the node implements a fail-safe return 
-      of the original state to prevent data loss.
-    - ID Validation: Monitors for messages lacking unique identifiers. Messages without 
-      IDs cannot be pruned via `RemoveMessage` and will trigger a system warning to 
-      alert for potential state corruption or misconfiguration.
+    - Fault Tolerance: On LLM or parsing failures, the node returns an empty dict as a fail-safe 
+      to preserve the original state and prevent data loss.
+    - Logging: Tracks summarization events and exceptions for observability.
 
     Args:
-        state (GraphState): Current graph state containing 'messages' (List[BaseMessage]) 
+        state (GraphState): Current graph state containing 'turn_messages' (List[BaseMessage]) 
                            and the 'summary' (Dict) object.
 
     Returns:
-        GraphState: An updated state dictionary containing the consolidated 'summary' 
-                   and a list of `RemoveMessage` + `SystemMessage` objects.
+        dict: An updated state dictionary containing the consolidated 'summary' (ConversationSummary 
+              serialized as dict), or an empty dict on failure to preserve original state.
     """
     
-    messages = state.get("messages", [])
     summary = state.get("summary", INITIAL_SUMMARY)
-    conversation_id = state.get("conversation_id", "unknown")
+    turn_messages = state.get("turn_messages", [])
     
-    logger.info(f"Summarizing {len(messages)} messages")
+    logger.info(f"Summarizing {len(turn_messages)} messages")
     
     writer = get_stream_writer()
-    writer(f"🤖 Summarizing {len(messages)} messages...")
+    writer(f"🤖 Summarizing {len(turn_messages)} messages...")
     
     prompt = SUMMARY_PROMPT.format(
         previous_summary=json.dumps(summary, ensure_ascii=False),
-        messages=format_messages(messages) 
+        turn_messages=format_messages(turn_messages) 
     )
 
     try:
-        chain = summarization_llm | JsonOutputParser()
-        new_summary = await chain.ainvoke(prompt)
-        
-        # Validate summary structure before committing
-        required_keys = {"decisions", "constraints", "open_tasks", "context"}
-        if not isinstance(new_summary, dict) or not required_keys.issubset(new_summary.keys()):
-            raise ValueError(f"Invalid summary structure. Expected keys: {required_keys}")
-        
-        logger.info(f"Summarization completed successfully for conversation_id: {conversation_id}")
-        
-        # Checkpointer optimization: Replace all messages with single summary marker
-        ids_to_delete = [m.id for m in messages if m.id]
-        if len(ids_to_delete) != len(messages):
-            logger.warning(f"Some messages do not have ID and could not be removed from state in {conversation_id}")
-
-        delete_messages = [RemoveMessage(id=mid) for mid in ids_to_delete]
-        summary_marker = SystemMessage(
-            content=f"[CONVERSATION_SUMMARIZED] \n{json.dumps(new_summary, ensure_ascii=False)}"
+        # PydanticOutputParser provides automatic validation and retry
+        parser = PydanticOutputParser(
+            pydantic_object=ConversationSummary
         )
-        
+
+        chain = summarization_llm | parser
+        validated = await chain.ainvoke(prompt)
+
         return {
-            "messages": delete_messages + [summary_marker]  # Single message for checkpointer efficiency
+            "summary": validated.model_dump()
         }
         
     except Exception as e:
-        logger.exception(
-            "Error during summarization_node execution",
-            extra={
-                "conversation_id": conversation_id,
-                "node": "summarization_node"
-            }
-        )
+        logger.exception(f"Error during summarization_node execution: {e}")
         return {} # Fail safe - preserve original state

@@ -11,7 +11,8 @@ from .nodes import (
     route_from_schema,
     route_from_tools,
     summarization_node,
-    error_llm
+    error_llm,
+    cleanup_node
 )
 
 # ====================================
@@ -49,22 +50,22 @@ async def build_graph(checkpointer: AsyncPostgresSaver = None) -> StateGraph:
     # ---- Nodes ----
     builder.add_node("summarize", summarization_node) # Node to summarize messages
     builder.add_node("get_schema", get_schema_node) # Node to fetch DB schema dynamically
-    builder.add_node("db_disabled", db_disabled_node) # Node for handling empty/unreachable DB
     builder.add_node("llm", llm_node) # Node for LLM reasoning with tool bindings
     builder.add_node("tools", tool_node) # Node for tool execution with retry logic
     builder.add_node("error_llm", error_llm)
+    builder.add_node("cleanup", cleanup_node)
     
     # ---- Edges ----
     # Add guardrail before get_schema
     builder.add_edge(START, "get_schema")  # Prefetch schema once at start (cached)
-    builder.add_conditional_edges("get_schema", route_from_schema) # Schema loaded, proceed to summarize or llm
-    builder.add_edge("summarize", "llm") # After summarization (if needed) return to the LLM 
-    builder.add_conditional_edges("llm", route_from_llm)  # Check for tool calls or end conversation
+    builder.add_conditional_edges("get_schema", route_from_schema) # Schema loaded, 
+    builder.add_conditional_edges("llm", route_from_llm)  # Check for tool calls or summarization
     builder.add_conditional_edges("tools", route_from_tools) # Handle retries/errors (if any) or LLM
-
-    builder.add_edge("error_llm", END) # Always after error LLM, end the flow
+    builder.add_edge("error_llm", "cleanup") # After error handling, goes to cleanup and end conversation without summarizing
+    builder.add_edge("summarize", "cleanup") # Clean the state to save checkpointer space
+    builder.add_edge("cleanup", END)
     
     # ---- Compile Graph ----
-    graph = builder.compile(checkpointer=checkpointer)
-
+    # Checkpointer for snapshotting all the state across executions
+    graph = builder.compile(checkpointer=checkpointer) 
     return graph

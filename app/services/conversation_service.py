@@ -181,6 +181,29 @@ class ConversationService:
             logger.error(f"Unexpected error in save_message: {str(e)}", exc_info=True)
             raise
 
+    async def get_conversations(self, user_email: str):
+        """
+        Retrieves all conversations for a given user.
+        
+        Args:
+            user_email (str): Email address of the user
+        """
+        
+        try:
+            stmt = (
+                select(Conversation)
+                .where(Conversation.user_email == user_email)
+                #.options(selectinload(Conversation.messages))
+                .order_by(Conversation.updated_at.desc())
+            )
+
+            result = await self.db.execute(stmt)
+            return result.scalars().all()
+        except SQLAlchemyError as e:
+            logger.error(f"Database error in get_conversations: {str(e)}", exc_info=True)
+            raise 
+
+
     async def get_conversation_history(self, conversation_id: str, limit: int = 50):
         """
         Retrieves the chronological message history for a conversation.
@@ -205,15 +228,19 @@ class ConversationService:
         Note:
             There's a bug in the current implementation - uses self.session instead of self.db
         """
-        stmt = (
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
-            .order_by(
-                Message.timestamp.asc(),
-                Message.id.asc(),
+        try:
+            stmt = (
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(
+                    Message.timestamp.asc(),
+                    Message.id.asc(),
+                )
+                .limit(limit)
             )
-            .limit(limit)
-        )
 
-        result = await self.db.execute(stmt)
-        return result.scalars().all()
+            result = await self.db.execute(stmt)
+            return result.scalars().all()
+        except SQLAlchemyError as e:
+            logger.error(f"Database error in get_conversation_history: {str(e)}", exc_info=True)
+            raise

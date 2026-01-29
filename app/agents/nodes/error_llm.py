@@ -1,9 +1,10 @@
 from langchain_core.messages import SystemMessage
 from agents.state import GraphState
 from agents.llm_factory import LLMFactory
+from agents.config import PROVIDER
 from .config import ERROR_PROMPT
 
-llm_factory = LLMFactory(provider="bedrock")
+llm_factory = LLMFactory(provider=PROVIDER)
 llm = llm_factory.get_summary_llm()
 
 import logging
