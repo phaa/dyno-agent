@@ -2,12 +2,18 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
-from app.eval.agent_executor import AgentExecutor
-from app.eval.decision_validator import DecisionValidator
-from app.eval.qa_validator import QAValidator
+from .agent_executor import AgentExecutor
+from .decision_validator import DecisionValidator
+from .qa_validator import QAValidator
 from .models import ValidationResult
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 GOLDEN_SETS_DIR = Path(__file__).parent / "golden_sets"
 DECISIONS_FILE = GOLDEN_SETS_DIR / "agent_decisions_v1.0.0.json"
@@ -82,7 +88,9 @@ class GoldenSetRunner:
         
         try:
             context = await self.executor.run(user_input, test_id)
-            return self.decision_validator.validate(context, expected)
+            result = self.decision_validator.validate(context, expected)
+            result.agent_response = context.final_message
+            return result
         except Exception as e:
             logger.error(f"Error executing decision case {test_id}: {str(e)}")
             return ValidationResult(
@@ -90,18 +98,20 @@ class GoldenSetRunner:
                 test_type="decision",
                 passed=False,
                 errors=[f"Execution error: {str(e)}"],
-                warnings=[]
+                warnings=[],
+                agent_response=""
             )
     
     async def _run_qa_case(self, case: dict[str, Any]) -> ValidationResult:
         """Execute and validate a single QA case."""
         test_id = case["id"]
         user_input = case["input"]
-        expected = case["expected"]
         
         try:
             context = await self.executor.run(user_input, test_id)
-            return self.qa_validator.validate(context, expected)
+            result = self.qa_validator.validate(context, case)
+            result.agent_response = context.final_message
+            return result
         except Exception as e:
             logger.error(f"Error executing QA case {test_id}: {str(e)}")
             return ValidationResult(
@@ -109,13 +119,19 @@ class GoldenSetRunner:
                 test_type="qa",
                 passed=False,
                 errors=[f"Execution error: {str(e)}"],
-                warnings=[]
+                warnings=[],
+                agent_response=""
             )
     
     def _print_pass(self, result: ValidationResult):
         """Print a passing test result."""
         status = "✓ PASS"
         logger.info(f"{status} [{result.test_type}] {result.test_id}")
+        if result.agent_response and result.agent_response.strip():
+            response_preview = result.agent_response[:200] + "..." if len(result.agent_response) > 200 else result.agent_response
+            logger.info(f"  → Agent: {response_preview}")
+        else:
+            logger.info(f"  → Agent: (empty response)")
     
     def _print_fail(self, result: ValidationResult):
         """Print a failing test result with details."""
@@ -125,6 +141,12 @@ class GoldenSetRunner:
             logger.error(f"  • {error}")
         for warning in result.warnings:
             logger.warning(f"  ⚠ {warning}")
+        # Always show agent response for debugging
+        if result.agent_response and result.agent_response.strip():
+            response_preview = result.agent_response[:200] + "..." if len(result.agent_response) > 200 else result.agent_response
+            logger.error(f"  → Agent: {response_preview}")
+        else:
+            logger.error(f"  → Agent: (empty response)")
 
     def _load_golden_sets(self, file_path: Path) -> list[dict[str, Any]]:
         """Load golden set test cases from JSON file."""

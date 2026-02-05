@@ -69,12 +69,12 @@ class LLMFactory:
         if self._provider == "local":
             return self._setup_llm(
                 temperature=0.5,
-                max_tokens=1024,
+                max_tokens=1500,
             )
 
         return self._setup_llm(
             temperature=0.0,
-            max_tokens=1024,
+            max_tokens=1500,
         )
 
     def get_summary_llm(self):

@@ -20,34 +20,37 @@ async def error_llm(state: GraphState):
     error_node = state.get("error_node")
     user_name = state.get("user_name")
     retry_count = state.get("retry_count", 0)
+    user_input = state.get("user_input", "")
 
     msgs = [
         SystemMessage(
             content=ERROR_PROMPT.format(
                 error=error,
                 error_node=error_node,
-                user_name=user_name
+                user_name=user_name,
+                user_input=user_input,
             )
         ),
     ]
     
-    msgs.extend(state.get("messages", []))
-    ai = await llm.ainvoke(msgs)
-    
-    logger.error(
-        f"Graceful error handling triggered",
-        extra={
-            "error_message": error,
-            "failed_node": error_node,
-            "retry_attempts_left": retry_count
+    try:
+        ai = await llm.ainvoke(msgs)
+        
+        logger.error(
+            f"Graceful error handling triggered at node {error_node} with message: {error} llm response: {ai.content}",
+            extra={
+                "error_message": error,
+                "failed_node": error_node,
+                "retry_attempts_left": retry_count
+            }
+        )
+        
+        return {
+            "messages": [ai],
+            "error": None,  # Clear error state
+            "error_node": None,
+            "retry_count": 2 
         }
-    )
-    
-    return {
-        "messages": [ai],
-        "error": None,  # Clear error state
-        "error_node": None,
-        "retry_count": 2 
-    }
-
+    except Exception as e:
+        logger.error(f"Error in error_llm node: {str(e)}")
 

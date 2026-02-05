@@ -2,7 +2,7 @@
   {
     "id": "compatibility_basis",
     "input": "What determines whether a dyno can handle a vehicle?",
-    "expected_contains": [
+    "expected": [
       "supported_weight_classes",
       "supported_drives",
       "supported_test_types",
@@ -13,7 +13,7 @@
   {
     "id": "availability_query",
     "input": "How do you check which dynos are free for an AWD 4800 lb brake test next week?",
-    "expected_contains": [
+    "expected": [
       "find_available_dynos",
       "requires start_date and end_date",
       "filters out overlapping allocations where status != 'cancelled'",
@@ -24,7 +24,7 @@
   {
     "id": "weight_thresholds",
     "input": "How are weight limits handled?",
-    "expected_contains": [
+    "expected": [
       "weight_lbs is converted to <10K or >10K",
       "matching uses supported_weight_classes in the DB"
     ],
@@ -33,7 +33,7 @@
   {
     "id": "drive_type_override",
     "input": "Can we force an AWD vehicle onto a dyno that only supports 2WD?",
-    "expected_contains": [
+    "expected": [
       "request should be refused if supported_drives lacks AWD",
       "no manual override of drive compatibility"
     ],
@@ -42,7 +42,7 @@
   {
     "id": "maintenance_policy",
     "input": "How do we see which dynos are down for maintenance today?",
-    "expected_contains": [
+    "expected": [
       "maintenance_check_core",
       "enabled dynos with available_from in the future or available_to in the past are reported"
     ],
@@ -51,7 +51,7 @@
   {
     "id": "conflict_detection_logic",
     "input": "How are scheduling conflicts detected?",
-    "expected_contains": [
+    "expected": [
       "detect_conflicts_core",
       "self-join on the same dyno to find overlapping start and end dates",
       "ignores allocations with status 'cancelled'"
@@ -61,7 +61,7 @@
   {
     "id": "auto_allocate_flow",
     "input": "How does auto allocation work when I provide a vehicle id and a start date?",
-    "expected_contains": [
+    "expected": [
       "resolves vehicle by id or vin",
       "uses vehicle weight_lbs and drive_type with test_type defaulting to brake",
       "checks for existing overlapping allocations for the vehicle first",
@@ -73,7 +73,7 @@
   {
     "id": "existing_vehicle_guard",
     "input": "What happens if a vehicle is already allocated during those dates?",
-    "expected_contains": [
+    "expected": [
       "VehicleAlreadyAllocatedError",
       "overlapping allocations for the same vehicle are rejected unless cancelled"
     ],
@@ -82,7 +82,7 @@
   {
     "id": "query_database_rules",
     "input": "What SQL can I run through the agent?",
-    "expected_contains": [
+    "expected": [
       "query_database only allows SELECT",
       "DROP, DELETE, UPDATE, INSERT, ALTER are blocked",
       "statement_timeout of 2000ms is set",
@@ -93,7 +93,7 @@
   {
     "id": "completed_tests_metric",
     "input": "How do you count completed tests?",
-    "expected_contains": [
+    "expected": [
       "completed_tests_count_core",
       "counts allocations where status is 'completed'"
     ],
@@ -102,7 +102,7 @@
   {
     "id": "check_vehicle_allocations",
     "input": "How can I see where a vehicle is already scheduled?",
-    "expected_contains": [
+    "expected": [
       "check_vehicle_allocation_core",
       "joins dyno names and allocation dates for the vehicle"
     ],
@@ -111,7 +111,7 @@
   {
     "id": "backup_window_limit",
     "input": "When backup scheduling is on, how far ahead will it search?",
-    "expected_contains": [
+    "expected": [
       "backup windows iterate up to max_backup_days",
       "default max_backup_days is 7 if not overridden"
     ],
@@ -120,7 +120,7 @@
   {
     "id": "check_vehicle_allocations_nonexistent",
     "input": "How can I see the schedule for a vehicle that does not exist?",
-    "expected_contains": [
+    "expected": [
         "vehicle not found",
         "does not exist"
     ],

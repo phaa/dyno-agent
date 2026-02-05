@@ -44,10 +44,16 @@ async def get_schema_node(state: GraphState) -> GraphState:
                 schema[table_name] = []
             schema[table_name].append(column_name)
 
+        # Convert to compact string representation for prompt efficiency
+        schema_str = "\n".join(
+            f"{table}: {', '.join(columns)}"
+            for table, columns in sorted(schema.items())
+        )
+
         # Cache the result
-        schema_cache.set(schema)
+        schema_cache.set(schema_str)
         return {
-            "schema": schema,
+            "schema": schema_str,
         }
     except Exception as e:
         return {

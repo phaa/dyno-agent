@@ -24,8 +24,8 @@ clean: ## Clean containers and volumes
 test:
 	docker compose exec fastapi pytest
 
-test-golden: ## Run golden set evaluation (local, no Docker required)
-	python eval/run_agent_golden.py
+eval: ## Run golden set evaluation (local, no Docker required)
+	docker compose exec fastapi python -m eval.test_golden_sets
 
 db-shell:
 	docker compose exec db psql -U dyno_user -d dyno_db

@@ -244,3 +244,69 @@ class ConversationService:
         except SQLAlchemyError as e:
             logger.error(f"Database error in get_conversation_history: {str(e)}", exc_info=True)
             raise
+
+    @async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
+    async def delete_conversation(self, conversation_id: str, user_email: str):
+        """
+        Deletes a conversation and all its associated messages.
+        
+        This method performs complete cleanup of a conversation:
+        - Verifies the conversation belongs to the authenticated user (authorization)
+        - Deletes all messages associated with the conversation (cascades automatically)
+        - Deletes the conversation record itself
+        
+        Automatically retries on database transient failures with exponential backoff.
+        Non-retryable errors (validation, authorization) fail immediately.
+        
+        Args:
+            conversation_id (str): UUID of the conversation to delete
+            user_email (str): Email address of the user (for authorization check)
+            
+        Returns:
+            bool: True if conversation was successfully deleted, False if not found
+            
+        Raises:
+            NonRetryableError: Conversation doesn't exist or user not authorized
+            RetryableError: Database connection failures (auto-retried)
+            
+        Database Operations:
+            - Fetches conversation for authorization validation
+            - Deletes associated messages (via cascade relationship)
+            - Deletes the conversation record
+            - Uses flush() + commit() for immediate persistence
+            
+        Transaction Safety:
+            - Automatic rollback on any database errors
+            - Proper exception propagation for error handling
+        """
+        try:
+            conv = await self.db.get(Conversation, conversation_id)
+            if not conv:
+                raise NonRetryableError(f"Conversation {conversation_id} not found")
+            
+            if conv.user_email != user_email:
+                raise NonRetryableError(f"Not authorized to delete conversation {conversation_id}")
+            
+            # Delete conversation (messages will cascade delete due to relationship config)
+            await self.db.delete(conv)
+            
+            try:
+                await self.db.flush()  # writes to db without committing
+                await self.db.commit()
+            except SQLAlchemyError as e:
+                await self.db.rollback()
+                raise RetryableError(f"Database error deleting conversation: {str(e)}") from e
+            except Exception as e:
+                await self.db.rollback()
+                raise
+            
+            return True
+        
+        except (NonRetryableError, RetryableError):
+            # Re-raise our custom exceptions
+            raise
+        except SQLAlchemyError as e:
+            raise RetryableError(f"Database error in delete_conversation: {str(e)}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error in delete_conversation: {str(e)}", exc_info=True)
+            raise

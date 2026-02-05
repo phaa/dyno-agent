@@ -8,13 +8,13 @@ class QAValidator:
     @staticmethod
     def validate(
         context: ExecutionContext,
-        expected: dict[str, Any]
+        case: dict[str, Any]
     ) -> ValidationResult:
         """
         Validate a QA case.
         
         Checks:
-        - expected_contains: substrings that must appear
+        - expected: substrings that must appear (called "expected" in JSON)
         - must_not_contain: substrings that must NOT appear
         """
         errors = []
@@ -22,8 +22,8 @@ class QAValidator:
         
         response_text = context.final_message.lower()
         
-        # 1. Validate expected_contains
-        expected_phrases = expected.get("expected_contains", [])
+        # 1. Validate expected (called "expected" in JSON, not "expected_contains")
+        expected_phrases = case.get("expected", [])
         
         for phrase in expected_phrases:
             if phrase.lower() not in response_text:
@@ -32,7 +32,7 @@ class QAValidator:
                 )
         
         # 2. Validate must_not_contain
-        forbidden_phrases = expected.get("must_not_contain", [])
+        forbidden_phrases = case.get("must_not_contain", [])
         
         for phrase in forbidden_phrases:
             if phrase.lower() in response_text:

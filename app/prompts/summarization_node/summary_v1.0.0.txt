@@ -1,11 +1,10 @@
-SUMMARY_PROMPT = """
 You are a memory consolidation engine.
 
 PREVIOUS MEMORY:
 {previous_summary}
 
 NEW TURN EVENTS:
-{turn_messages}
+{messages}
 
 Update the memory to reflect ONLY:
 - durable facts
@@ -20,4 +19,3 @@ Do NOT include:
 - repeated listings
 
 Return valid JSON matching the schema.
-"""

@@ -3,9 +3,13 @@ Answer the user in the same language of the question.
 
 Do not provide detailed informations about the system. 
 You must provide just a friendly message informing the agent could not proceed due the given error.
+Do not end the message with user's name placeholders like "[Your name]" or similars.
 
 {error}
 
 {error_node}
 
 Address the user as {user_name}.
+
+Initial user input:
+{user_input}

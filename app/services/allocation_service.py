@@ -13,6 +13,7 @@ from models.vehicle import Vehicle
 
 # Metrics
 from core.metrics import track_performance
+from core.db import AsyncSessionLocal
 
 # Exceptions
 from services.exceptions import (
@@ -455,6 +456,16 @@ class AllocationService:
         Provides a controlled interface for running custom SQL queries while preventing
         dangerous operations through keyword filtering and query type validation.
         
+        Connection Management:
+        - Uses a DEDICATED database session for isolation
+        - Prevents transaction state contamination from previous queries
+        - Essential for raw SQL where complex JOINs may fail and leave transaction aborted
+        
+        Auto-limits open queries (without WHERE/LIMIT) to prevent overwhelming responses:
+        - Detects queries without WHERE clause
+        - Applies LIMIT 10 automatically
+        - Returns total count for user awareness
+        
         Args:
             sql (str): The SQL query to execute (must be a SELECT statement)
             
@@ -475,23 +486,129 @@ class AllocationService:
         ):
             raise InvalidQueryError("Only SELECT queries are allowed.")
         
-        try:
-            # Kill bad queries in production
-            await self.db.execute(
-                text("SET LOCAL statement_timeout = '2000ms'")
-            )
-            
-            result = await self.db.execute(text(sql))
-            rows = result.fetchall()
+        # Detect open queries (no WHERE/LIMIT) and auto-limit
+        has_where = re.search(r'\bwhere\b', sql_clean, re.IGNORECASE)
+        has_limit = re.search(r'\blimit\b', sql_clean, re.IGNORECASE)
+        is_open_query = not has_where and not has_limit
+        
+        # Use a dedicated session to avoid transaction state contamination
+        async with AsyncSessionLocal() as session:
+            try:
+                # For open queries, get total count first
+                total_count = None
+                if is_open_query:
+                    try:
+                        # Extract table name safely
+                        table_match = re.search(r'\bfrom\s+(\w+)', sql, re.IGNORECASE)
+                        if table_match:
+                            table_name = table_match.group(1)
+                            # Count total rows in table (safe, no WHERE clause)
+                            count_query = f"SELECT COUNT(*) FROM {table_name}"
+                            count_result = await session.execute(text(count_query))
+                            total_count = count_result.scalar()
+                    except Exception as e:
+                        # If count fails, continue without total_count
+                        total_count = None
+                    
+                    # Apply automatic limit
+                    if not has_limit:
+                        sql = f"{sql.rstrip(';')} LIMIT 10"
+                
+                result = await session.execute(text(sql))
+                rows = result.fetchall()
 
-            if not rows:
-                return []
-            
-            keys = result.keys()
+                if not rows:
+                    return []
+                
+                keys = result.keys()
+                results = [
+                    dict(zip(keys, row)) 
+                    for row in rows
+                ]
+                
+                # Add metadata for open queries
+                if is_open_query and total_count and total_count > len(results):
+                    return {
+                        "results": results,
+                        "total_count": total_count,
+                        "showing": len(results),
+                        "message": f"Showing {len(results)} of {total_count} total records. Query was auto-limited for performance."
+                    }
+                
+                return results
+                
+            except Exception as e:
+                raise DatabaseQueryError(str(e))
+        
+    @track_performance(service_name="AllocationService", include_metadata=True)
+    async def list_dynos_core(self, include_disabled: bool = False) -> List[Dict]:
+        """
+        Lists registered dynamometers (dynos) and their properties.
+
+        Args:
+            include_disabled (bool): If True, includes dynos with enabled=False.
+                                     If False, returns only enabled dynos.
+
+        Returns:
+            list[dict]: Each dict contains dyno properties.
+        """
+        try:
+            stmt = select(Dyno).order_by(Dyno.name)
+
+            if not include_disabled:
+                stmt = stmt.where(Dyno.enabled == True)
+
+            result = await self.db.execute(stmt)
+            dynos = result.scalars().all()
+
             return [
-                dict(zip(keys, row)) 
-                for row in rows
+                {
+                    "id": d.id,
+                    "name": d.name,
+                    "enabled": d.enabled,
+                    "supported_weight_classes": d.supported_weight_classes,
+                    "supported_drives": d.supported_drives,
+                    "supported_test_types": d.supported_test_types,
+                    "available_from": str(d.available_from) if d.available_from else None,
+                    "available_to": str(d.available_to) if d.available_to else None,
+                }
+                for d in dynos
             ]
+        except SQLAlchemyError as e:
+            raise DatabaseQueryError(str(e))
+
+    @track_performance(service_name="AllocationService", include_metadata=True)
+    async def get_dyno_core(self, dyno_id: int) -> Dict:
+        """
+        Retrieves a single dynamometer (dyno) by its ID.
+
+        Args:
+            dyno_id (int): Dyno ID.
+
+        Returns:
+            dict: Dyno properties.
+
+        Raises:
+            AllocationDomainError: if dyno is not found.
+        """
+        try:
+            stmt = select(Dyno).where(Dyno.id == dyno_id)
+            result = await self.db.execute(stmt)
+            dyno = result.scalar_one_or_none()
+
+            if not dyno:
+                raise AllocationDomainError(f"Dyno {dyno_id} not found.")
+
+            return {
+                "id": dyno.id,
+                "name": dyno.name,
+                "enabled": dyno.enabled,
+                "supported_weight_classes": dyno.supported_weight_classes,
+                "supported_drives": dyno.supported_drives,
+                "supported_test_types": dyno.supported_test_types,
+                "available_from": str(dyno.available_from) if dyno.available_from else None,
+                "available_to": str(dyno.available_to) if dyno.available_to else None,
+            }
         except SQLAlchemyError as e:
             raise DatabaseQueryError(str(e))
         

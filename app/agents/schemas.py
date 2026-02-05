@@ -6,34 +6,24 @@ from pydantic import BaseModel, Field
 
 class ConversationSummary(BaseModel):
     """
-    Schema for validated conversation summary structure.
+    Schema for conversation history in narrative action format.
     
-    This schema enforces the structured format used by the summarization node
-    to maintain conversation context in a compressed, high-signal format.
+    Stores user actions chronologically as simple past-tense sentences.
+    This format is more natural for LLM context and easier to interpret.
     """
-    decisions: list[str] = Field(
+    actions: list[str] = Field(
         default_factory=list,
-        description="Key decisions made during the conversation"
-    )
-    constraints: list[str] = Field(
-        default_factory=list,
-        description="Important constraints or limitations mentioned"
-    )
-    open_tasks: list[str] = Field(
-        default_factory=list,
-        description="Pending tasks or actions to be completed"
-    )
-    context: str = Field(
-        default="",
-        description="General context and background information from the conversation"
+        description="Chronological list of user actions in this conversation (max 10)"
     )
     
     class Config:
         json_schema_extra = {
             "example": {
-                "decisions": ["User allocated vehicle VIN 123 to dyno ID 45"],
-                "constraints": ["4k miles tests cannot be allocated to dynos under maintenance"],
-                "open_tasks": ["Check for delayed allocations"],
-                "context": "User is managing vehicle-dyno allocations and needs to track maintenance status."
+                "actions": [
+                    "User allocated vehicle VIN123 to dyno 2 starting 2024-06-01",
+                    "User asked for all AWD vehicles",
+                    "User checked conflicts for dyno 3"
+                ]
             }
         }
+

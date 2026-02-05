@@ -1,21 +1,34 @@
 from typing import List, Optional, TypedDict
 from typing_extensions import Annotated
 from langchain_core.messages import BaseMessage
-from langgraph.pregel import add_messages
+from langgraph.graph.message import add_messages
 
 
 class AgentSummary(TypedDict):
-    decisions: List[str]
-    constraints: List[str]
-    open_tasks: List[str]
-    context: str
+    """
+    Conversation summary tracking user actions in narrative format.
+    
+    Instead of structured fields, stores a chronological list of user actions:
+    - "User allocated vehicle VIN123 to dyno 2"
+    - "User asked for all AWD vehicles" 
+    - "User checked conflicts for dyno 3"
+    
+    This format is more natural and easier to inject into LLM context
+    """
+    actions: List[str]
 
 
 class GraphState(TypedDict):
     """
-    Enhanced graph state with comprehensive error handling and retry control.
+    Enhanced graph state with sliding window message management.
     
-    Error Handling Architecture:
+    Message Management:
+    - **messages**: Full conversation history with sliding window
+      - Grows until ~4-5K tokens (AI + Human messages only)
+      - Auto-summarizes when limit exceeded
+      - Maintains ~800 token tail for context after summarization
+    
+    Error Handling:
     - **retry_count**: Remaining retry attempts (default: 2)
     - **error**: Current error message for debugging and user feedback
     - **error_node**: Which node failed (enables targeted retry strategies)
@@ -25,7 +38,7 @@ class GraphState(TypedDict):
     - FatalException: Immediately fails without retry
     - Zero retry_count: Routes to graceful error handler
     
-    Benefits for Production :
+    Benefits:
     - Automatic recovery from transient failures (network, timeouts)
     - Fast failure for permanent errors (auth, validation)
     - Comprehensive error tracking for monitoring and debugging
@@ -38,8 +51,8 @@ class GraphState(TypedDict):
     # Memory (persisted)
     summary: AgentSummary
 
-    # Turn-scoped (ephemeral)
-    turn_messages: Annotated[list[BaseMessage], add_messages]
+    # Messages (persisted with sliding window)
+    messages: Annotated[list[BaseMessage], add_messages]
 
     # Input (ephemeral)
     user_input: str

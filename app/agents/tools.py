@@ -50,25 +50,29 @@ def get_datetime_now():
 # ---------------------------------------
 
 @tool
-async def find_available_dynos(start_date: date, end_date: date, weight_lbs: int, drive_type: str, test_type: str):
+async def find_available_compatible_dynos_for_window(start_date: date, end_date: date, weight_lbs: int, drive_type: str, test_type: str):
     """
-    Use this tool when the user wants to:
-    - Find available dynos for a new test
-    - Check which dynos can run a test in a given date range
-    - Ask questions like:
-        * "Which dynos are available?"
-        * "Can I schedule a test between X and Y?"
-        * "What dynos support this vehicle?"
+    PURPOSE: Availability search ONLY.
+    Finds dynos that are BOTH (1) compatible with a vehicle/test and (2) free in a specific date window.
 
-    Do NOT use this tool to allocate or book a dyno.
-    This tool is read-only and does not create allocations.
+    CALL THIS TOOL ONLY IF ALL parameters are explicitly known:
+    - start_date AND end_date
+    - weight_lbs
+    - drive_type
+    - test_type
 
-    Returns:
-        A list of available dynos that match:
-        - Date availability
-        - Vehicle weight
-        - Drive type (AWD / 2WD)
-        - Test type
+    DO NOT USE this tool to:
+    - list registered dynos ("dynos cadastrados", "listar dynos", "ver todos os dynos")
+    - show dyno properties/details without an availability question
+    - answer maintenance-only questions
+    - answer generic "quais dynos temos?" questions
+
+    Use cases (correct):
+    - "Quais dynos estão disponíveis de 2026-02-01 a 2026-02-03 para veículo 2WD, 8200 lbs, teste brake?"
+    - "Consigo rodar um teste X no período Y com veículo AWD e peso Z?"
+
+    If user asks "dynos disponíveis" but doesn't provide date window + vehicle/test requirements:
+    - DO NOT call any tool; ask for missing parameters.
     """
     
     writer = get_stream_writer()
@@ -213,19 +217,20 @@ async def maintenance_check():
 @tool
 async def query_database(sql: str):
     """
-    Executes a secure SQL SELECT query on the database.
+    Read-only SQL SELECT tool.
 
-    - This is the agent's generic query mechanism.
-    - Only SELECT statements are allowed.
-    - Avoid queries without where clauses and limit clauses.
+    Use this tool when the user asks to LIST/VIEW registered data
+    and there is no specialized tool available, e.g.:
+    - "Quais dynos temos cadastrados?"
+    - "Liste os veículos cadastrados"
+    - "Mostre as propriedades do dyno 3"
 
-    Args:
-        sql (str): A SQL SELECT statement to execute.
+    Open SELECT queries are allowed for listing; the system may auto-limit results
+    and will return total_count/showing metadata.
     
-    Returns:
-        - A list of dictionaries representing rows.
-        - "No results found." if the query succeeds but returns empty.
-        - An error message in case of failure.
+    Use PostgreSQL syntax.
+
+    Only SELECT statements are allowed.
     """
 
     writer = get_stream_writer()
@@ -284,13 +289,60 @@ async def auto_allocate_vehicle(
     return result
 
 
+@tool
+async def list_dynos(include_disabled: bool = False):
+    """
+    Use this tool when the user asks to:
+    - List registered dynos ("dynos cadastrados", "listar dynos", "quais dynos temos")
+    - View dyno properties (registry view, not availability)
+
+    This tool is NOT for availability search.
+    For availability in a date window with vehicle/test constraints, use the availability tool.
+
+    Args:
+        include_disabled (bool): If True, include dynos where enabled=False.
+                                 If False, list only enabled dynos.
+
+    Returns:
+        A list of dynos with their properties.
+    """
+    writer = get_stream_writer()
+    writer("📄 Listing registered dynamometers...")
+
+    service = _get_service_from_runtime()
+    return await service.list_dynos_core(include_disabled=include_disabled)
+
+
+@tool
+async def get_dyno(dyno_id: int):
+    """
+    Use this tool when the user asks to:
+    - Show details/properties of a specific dyno by ID
+
+    This tool is NOT for availability search.
+
+    Args:
+        dyno_id (int): Dyno ID.
+
+    Returns:
+        A dictionary with dyno properties.
+    """
+    writer = get_stream_writer()
+    writer(f"🔎 Fetching dynamometer {dyno_id}...")
+
+    service = _get_service_from_runtime()
+    return await service.get_dyno_core(dyno_id=dyno_id)
+
+
 TOOLS = [
     get_datetime_now,
-    find_available_dynos,
+    find_available_compatible_dynos_for_window,
     check_vehicle_allocation,
     detect_conflicts,
     completed_tests_count,
     maintenance_check,
     query_database,
     auto_allocate_vehicle,
+    list_dynos,
+    get_dyno,
 ]

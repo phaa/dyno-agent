@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 
 # Data Models
@@ -10,6 +9,7 @@ class ValidationResult:
     passed: bool
     errors: list[str]
     warnings: list[str]
+    agent_response: str = ""  # Agent's response text
 
 
 @dataclass

@@ -7,25 +7,34 @@ Executes the real agent against golden sets and validates:
 - QA cases: expected_contains, must_not_contain
 """
 
-import sys
 import asyncio
 import logging
+import sys
+import os
 
-from .golden_set_runner import GoldenSetRunner
+# Necessary for importing db and models
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from eval.golden_set_runner import GoldenSetRunner
 
 # Configuration
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
 
 # Main Entry Point
 async def main():
     """Main entry point."""
     runner = GoldenSetRunner()
     
+    
     try:
+        logger.info("\nStarting tests!")
         passed, failed, results = await runner.run_all()
         
         # Summary

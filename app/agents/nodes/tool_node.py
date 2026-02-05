@@ -1,5 +1,6 @@
 import logging
 from langgraph.prebuilt import ToolNode
+from langgraph.types import Overwrite
 
 from services.exceptions import FatalException, RetryableException
 # from services.exceptions import InvalidQueryError # uncomment for error simulation
@@ -34,13 +35,15 @@ async def tool_node(state: GraphState) -> GraphState:
     """
     try:
         # Execute tools using base ToolNode
-        result = await base_tool_node.ainvoke(state)
+        # ToolNode expects 'messages' field
+        tool_input = {"messages": state.get("messages", [])}
+        result = await base_tool_node.ainvoke(tool_input)
         
         # raise InvalidQueryError("Erro ao acessar o banco de dados de veiculos") # uncomment for error simulation
         
         # Clear any previous error state
         return {
-            **result,
+            "messages": Overwrite(result.get("messages", [])),
             "error": None,
             "error_node": None,
             "retry_count": 2  # Reset retry count for next operation

@@ -1,12 +1,65 @@
 import re
 import logging
 from langchain_core.messages.utils import count_tokens_approximately
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, BaseMessage
 from langgraph.graph import END
+from langgraph.types import Overwrite
 from agents.state import GraphState
-from .config import INITIAL_SUMMARY
+from .config import INITIAL_SUMMARY, TOKEN_WINDOW_LIMIT, TAIL_TOKENS
 
 logger = logging.getLogger(__name__)
+
+def count_user_agent_tokens(messages: list[BaseMessage]) -> int:
+    """
+    Count tokens from only AIMessage and HumanMessage.
+    Other message types (ToolMessage, SystemMessage) are ignored.
+    
+    Uses approximate token counting for speed.
+    """
+    user_agent_messages = [
+        msg for msg in messages 
+        if isinstance(msg, (AIMessage, HumanMessage))
+    ]
+    return count_tokens_approximately(user_agent_messages)
+
+
+def should_summarize_messages(messages: list[BaseMessage]) -> bool:
+    """
+    Check if messages have exceeded the token window limit.
+    Only considers AIMessage and HumanMessage for token counting.
+    
+    Returns:
+        bool: True if summarization is needed
+    """
+    token_count = count_user_agent_tokens(messages)
+    return token_count > TOKEN_WINDOW_LIMIT
+
+
+def get_tail_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """
+    Extract the tail of messages to keep after summarization.
+    Keeps approximately TAIL_TOKENS worth of recent AI/Human messages.
+    
+    Args:
+        messages: All messages from the conversation
+        
+    Returns:
+        list[BaseMessage]: The tail messages to preserve (reversed from newest)
+    """
+    tail = []
+    token_count = 0
+    
+    # Iterate from end (newest) backwards
+    for msg in reversed(messages):
+        if isinstance(msg, (AIMessage, HumanMessage)):
+            msg_tokens = count_tokens_approximately([msg])
+            token_count += msg_tokens
+            tail.insert(0, msg)  # Insert at beginning to maintain order
+            
+            if token_count >= TAIL_TOKENS:
+                break
+    
+    return tail
 
 def should_summarize(messages: list) -> bool:
     tokens_count = count_tokens_approximately(messages)
@@ -36,16 +89,14 @@ def route_from_schema(state: GraphState) -> str:
     """ logger.critical("STATE SNAPSHOT")
     for k, v in state.items():
         if isinstance(v, list):
-            logger.critical("%s: %d items", k, len(v))
+            logger.critical(f"{k}: {sum(len(msg.content) for msg in v)} chars in list of {len(v)} items")
         else:
-            logger.critical("%s: %s", k, type(v))
-            
+            logger.critical(f"{k}: {v}")
     
-    for m in state.get("messages", []):
+    for m in state.get("messages"):
         logger.critical("MSG %s %s", m.type, len(m.content)) """
     
     error = state.get("error")
-    
     if error:
         logger.error(f"Error after schema fetch: {error}")
         return "error_llm"
@@ -63,6 +114,11 @@ def route_from_llm(state: GraphState):
     Returns:
         str: Next node name ('tools', or 'summarize')
     """ 
+    
+    error = state.get("error")
+    if error:
+        logger.error(f"Error after llm_node call: {error}")
+        return "error_llm"
     
     last = state["messages"][-1]
     if isinstance(last, AIMessage) and last.tool_calls:
@@ -100,7 +156,7 @@ def db_disabled_node(state: GraphState) -> GraphState:
     """Handles the case where the database is empty or unreachable."""
     error_message = "Apparently our database is not configured. Aborting further operations"
     return {
-        "messages": [AIMessage(content=error_message)]
+        "messages": [AIMessage(content=error_message)],
     } 
 
 # Deprecated in favor of error_llm node
@@ -143,9 +199,38 @@ def error_handler_node(state: GraphState) -> GraphState:
 
 
 def cleanup_node(state: GraphState) -> GraphState:
-    """Clean up temporary fields from state to prevent leakage."""
+    """Clean up temporary fields from state to prevent leakage.
+    
+    Uses Overwrite only for reducer fields to force complete replacement.
+    
+    Persists:
+    - conversation_id, user_name (identity)
+    - summary (persistent memory)
+    
+    Does NOT clear messages (persistent conversation history)
+
+    Clears non-reducer ephemeral fields:
+    - user_input
+    - retry_count, error, error_node
+    - schema
+    
+    Checkpointer will only save identity and summary to DB.
+    """
+    logger.info("Cleaning up state before ending graph.")
+    
     return {
-        "summary": state.get("summary", INITIAL_SUMMARY)
+        # Identity (required for thread reference)
+        "conversation_id": state.get("conversation_id"),
+        "user_name": state.get("user_name"),
+        # Persistent (saved to checkpointer)
+        "summary": state.get("summary", INITIAL_SUMMARY),
+        # Note: messages field is NOT cleared (persistent history)
+        # Ephemeral
+        "user_input": None,
+        "retry_count": 2, # reset for next turn
+        "error": None,
+        "error_node": None,
+        "schema": None
     }
 
 
@@ -193,5 +278,4 @@ def strip_thinking_tags(content: str) -> str:
     cleaned = ''.join(result_chars)
     cleaned = '\n'.join(line.rstrip() for line in cleaned.split('\n'))
     cleaned = re.sub(r'\n\s*\n+', '\n\n', cleaned).strip()
-    return cleaned
     return cleaned
