@@ -1,5 +1,5 @@
 from typing import List, Optional, TypedDict
-from typing_extensions import Annotated
+from typing_extensions import Annotated, Optional
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
@@ -57,8 +57,8 @@ class GraphState(TypedDict):
     # Input (ephemeral)
     user_input: str
 
-    # Errors (ephemeral)
-    retry_count: int
+    # Errors (ephemeral) - retry_count com default é gerenciado no graph
+    retry_count: Optional[int]
     error: Optional[str]
     error_node: Optional[str]
 

@@ -1,11 +1,10 @@
 import logging
 from langgraph.prebuilt import ToolNode
-from langgraph.types import Overwrite
-
 from services.exceptions import FatalException, RetryableException
 # from services.exceptions import InvalidQueryError # uncomment for error simulation
 from agents.state import GraphState
 from agents.tools import TOOLS
+from .utils import reset_error_state, decrement_retry_count, set_fatal_error
 
 logger = logging.getLogger(__name__)
 
@@ -36,43 +35,35 @@ async def tool_node(state: GraphState) -> GraphState:
     try:
         # Execute tools using base ToolNode
         # ToolNode expects 'messages' field
-        tool_input = {"messages": state.get("messages", [])}
-        result = await base_tool_node.ainvoke(tool_input)
+        #tool_input = {"messages": state.get("messages", [])}
+        result = await base_tool_node.ainvoke(state.get("messages", []))
         
         # raise InvalidQueryError("Erro ao acessar o banco de dados de veiculos") # uncomment for error simulation
         
-        # Clear any previous error state
+        # When successful, clear any previous error state
         return {
-            "messages": Overwrite(result.get("messages", [])),
-            "error": None,
-            "error_node": None,
-            "retry_count": 2  # Reset retry count for next operation
+            "messages": result,
+            **reset_error_state(),
         }
         
     except RetryableException as e:
         # Retryable error: Decrement retry count and preserve error info
         logger.warning(f"Retryable error in tools: {str(e)}")
         return {
-            "retry_count": max(0, state.get("retry_count", 2) - 1),
-            "error": str(e),
-            "error_node": "tools"
+            **decrement_retry_count(state, f"Retryable error in tools: {str(e)}", "tools")
         }
         
     except FatalException as e:
         # Fatal error: Immediate failure without retry
         logger.error(f"Fatal error in tools: {str(e)}")
         return {
-            "retry_count": 0,  # Force immediate error handling
-            "error": str(e),
-            "error_node": "tools"
+            **set_fatal_error(f"Fatal error in tools: {str(e)}", "tools")
         }
         
     except Exception as e:
         # Unknown error: Treat as retryable but log for investigation
         logger.error(f"Unknown error in tools (treating as retryable): {str(e)}", exc_info=True)
         return {
-            "retry_count": max(0, state.get("retry_count", 2) - 1),
-            "error": f"Unexpected error: {str(e)}",
-            "error_node": "tools"
+            **decrement_retry_count(state, f"Unexpected error in tools: {str(e)}", "tools")
         }
     

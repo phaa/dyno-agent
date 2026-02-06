@@ -8,10 +8,10 @@ from typing import AsyncGenerator, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage
-from langgraph.types import Overwrite
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.graph import build_graph
+from agents.config import ERROR_RETRY_COUNT
 from services.conversation_service import ConversationService
 from auth.auth_bearer import JWTBearer
 from auth.auth_handler import get_user_email_from_token
@@ -157,8 +157,8 @@ async def chat_stream(
     if conversation.user_email != user_email:
         raise HTTPException(status_code=400, detail="User doesn't exist.")
 
-    conversation_id = conversation.id
-    user_name = (user.fullname or user_email).split()[0]
+    conversation_id = conversation.id # Avoid async closure issues by capturing conversation_id in a local variable
+    user_name = user.fullname.split()[0]
 
     async def event_generator() -> AsyncGenerator[str, None]:
         start_time = time.time()
@@ -166,7 +166,6 @@ async def chat_stream(
         final_assistant_response: str | None = None
 
         try:
-            # salva user message (mantém seu comportamento)
             try:
                 await conv_service.save_message(
                     conversation_id=conversation_id,
@@ -176,10 +175,13 @@ async def chat_stream(
             except Exception as e:
                 logger.warning(f"Failed to save user message: {str(e)}")
 
+            # Instead of passing the user input as a HumanMessage in the messages list within stream_args, 
+            # we inject it as a separate "user_input" field in the graph state for using later in the error_llm node
             inputs = {
-                "user_input": user_message,
+                "user_input": user_message, 
                 "user_name": user_name,
                 "conversation_id": conversation_id,
+                "retry_count": ERROR_RETRY_COUNT,  # Initial retry count
             }
             config = {"configurable": {"thread_id": f"{user_email}_{conversation_id}"}}
             context = UserContext(db=db)
@@ -192,7 +194,7 @@ async def chat_stream(
             }
 
             async for stream_mode, chunk in graph.astream(**stream_args):
-                # Para de processar se o cliente caiu
+                # Stops processing if client disconnects to save resources (important for streaming endpoints)
                 if await request.is_disconnected():
                     logger.info(f"Client disconnected: user={user_email} conv={conversation_id}")
                     break
@@ -207,15 +209,13 @@ async def chat_stream(
                 try:
                     for _, data in chunk.items():
                         # Discard non message updates
-                        if not data or "turn_messages" not in data:
+                        if not data or "messages" not in data:
                             continue
 
-                        turn_messages = data["turn_messages"]
-                        if isinstance(turn_messages, Overwrite):
-                            turn_messages = turn_messages.value
+                        turn_messages = data["messages"]
 
                         # Get the last AI message with content
-                        # Dont create list, reduces to O(n) in the worst case
+                        # Dont create a list, reduces to O(n) in the worst case
                         msg = next((
                             m for m in reversed(turn_messages)
                             if isinstance(m, AIMessage) and m.content
@@ -269,16 +269,17 @@ async def chat_stream(
                 logger.exception("Failed to save assistant response")
 
             try:
-                duration_ms = (time.time() - start_time) * 1000
-                metrics_tracker = ConversationMetrics(db)
-                await metrics_tracker.track_conversation(
-                    user_message=user_message,
-                    assistant_response=final_assistant_response,
-                    user_email=user_email,
-                    conversation_id=conversation_id,
-                    duration_ms=duration_ms,
-                    tools_used=[],
-                )
+                if final_assistant_response:
+                    duration_ms = (time.time() - start_time) * 1000
+                    metrics_tracker = ConversationMetrics(db)
+                    await metrics_tracker.track_conversation(
+                        user_message=user_message,
+                        assistant_response=final_assistant_response,
+                        user_email=user_email,
+                        conversation_id=conversation_id,
+                        duration_ms=duration_ms,
+                        tools_used=[], # todo
+                    )
             except Exception:
                 logger.exception("Failed to track conversation metrics")
 

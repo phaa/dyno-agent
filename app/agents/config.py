@@ -15,3 +15,6 @@ AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 
 # Local inference server URL
 VLLM_URL = "http://vllm:8000/v1"
+
+# Default state values
+ERROR_RETRY_COUNT = 2  # Number of retries for retryable errors

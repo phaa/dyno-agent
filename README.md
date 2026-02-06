@@ -93,31 +93,12 @@ graph TB
     API --> Auth[JWT Authentication]
     API --> DB[(PostgreSQL Database)]
     
-    Agent --> CHECK{Token<br/>Check}
-    CHECK -->|≤4500| LLM[LLM Node]
-    CHECK -->|>4500| COMPRESS[Summarization<br/>Compression]
-    
-    COMPRESS -->|Remove old<br/>messages| LLM
-    
-    LLM --> ROUTE{Tool<br/>Calls?}
-    ROUTE -->|Yes| SCHEMA[Schema Node]
-    ROUTE -->|No| CLEANUP[Cleanup Node]
-    
-    SCHEMA --> Tools[9 Specialized Tools]
-    Tools --> TOOLS_NODE[Tool Node<br/>with Retries]
-    
-    TOOLS_NODE -->|Success| LLM
-    TOOLS_NODE -->|Error| RETRY{Retry<br/>Count?}
-    RETRY -->|Retry| TOOLS_NODE
-    RETRY -->|Exhausted| ERROR[Error LLM]
-    ERROR --> CLEANUP
+    Agent --> Tools[9 Specialized Tools]
+    Agent --> LLM
     
     Tools --> Allocator[Smart Allocator]
     Tools --> Validator[Constraint Validator]
     Tools --> Analyzer[Conflict Analyzer]
-    Tools --> QueryLimit[Query Limiter<br/>Auto-limit>20]
-    
-    CLEANUP --> DB
     
     subgraph "AWS Infrastructure"
         ECS[ECS Fargate]
@@ -128,11 +109,6 @@ graph TB
     
     API --> ECS
     DB --> RDS
-    
-    style CHECK fill:#fff9c4,stroke:#f57f17,stroke-width:2px
-    style COMPRESS fill:#ffe0b2,stroke:#e65100,stroke-width:2px
-    style LLM fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    style CLEANUP fill:#e0f2f1,stroke:#00695c,stroke-width:2px
 ```
 
 ### Core Components

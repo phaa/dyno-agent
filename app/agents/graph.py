@@ -53,7 +53,7 @@ async def build_graph(checkpointer: AsyncPostgresSaver = None) -> StateGraph:
     builder.add_node("llm", llm_node) # Node for LLM reasoning with tool bindings
     builder.add_node("tools", tool_node) # Node for tool execution with retry logic
     builder.add_node("error_llm", error_llm)
-    builder.add_node("cleanup", cleanup_node)
+    # builder.add_node("cleanup", cleanup_node)  # Disabled: cleanup was clearing state, preventing checkpointer persistence
     
     # ---- Edges ----
     # Add guardrail before get_schema
@@ -61,9 +61,13 @@ async def build_graph(checkpointer: AsyncPostgresSaver = None) -> StateGraph:
     builder.add_conditional_edges("get_schema", route_from_schema) # Schema loaded, 
     builder.add_conditional_edges("llm", route_from_llm)  # Check for tool calls or summarization
     builder.add_conditional_edges("tools", route_from_tools) # Handle retries/errors (if any) or LLM
-    builder.add_edge("error_llm", "cleanup") # After error handling, goes to cleanup and end conversation without summarizing
-    builder.add_edge("summarize", "cleanup") # Clean the state to save checkpointer space
-    builder.add_edge("cleanup", END)
+    # builder.add_edge("error_llm", "cleanup") # After error handling, goes to cleanup and end conversation without summarizing
+    # builder.add_edge("summarize", "cleanup") # Clean the state to save checkpointer space
+    # builder.add_edge("cleanup", END)
+    
+    # Direct to END - let checkpointer save full state automatically
+    builder.add_edge("error_llm", END)
+    builder.add_edge("summarize", END)
     
     # ---- Compile Graph ----
     # Checkpointer for snapshotting all the state across executions

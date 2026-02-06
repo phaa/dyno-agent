@@ -37,10 +37,10 @@ async def error_llm(state: GraphState):
         ai = await llm.ainvoke(msgs)
         
         logger.error(
-            f"Graceful error handling triggered at node {error_node} with message: {error} llm response: {ai.content}",
+            f"Graceful error handling triggered after '{error_node}' with message: {error} . Error llm response: {ai.content}",
             extra={
                 "error_message": error,
-                "failed_node": error_node,
+                "failed_node": error_node,  
                 "retry_attempts_left": retry_count
             }
         )

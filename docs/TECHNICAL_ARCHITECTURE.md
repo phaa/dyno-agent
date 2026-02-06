@@ -1163,155 +1163,48 @@ async def auto_allocate_vehicle(...):
 - **Storage Bloat**: PostgreSQL checkpointer grows unbounded
 - **Cost Escalation**: High token usage increases API costs exponentially
 
-### Sliding Window Memory Management Flow
+### Conversation Summarization Flow
 
 ```mermaid
 flowchart TD
-    START["START: User Query"] --> CHECK_TOKENS{"Message tokens<br/>≤ 4500?"}
+    START["START"] --> GET_SCHEMA["Get Schema<br/>(prefetch & cache)"]
+    GET_SCHEMA --> ROUTE_SCHEMA{"Summarization needed?"}
 
-    CHECK_TOKENS -->|"Yes (normal)"| LLM["LLM Node:<br/>Reason + Planning"]
-    CHECK_TOKENS -->|"No (compress)"| SUMMARIZE["Summarization Node:<br/>Token-based compression"]
+    ROUTE_SCHEMA -->|"Yes"| SUMMARIZE["Summarization Node:<br/>LLM context compression"]
+    ROUTE_SCHEMA -->|"No"| LLM["LLM Node"]
 
-    SUMMARIZE -->|"Compress old messages<br/>Keep ~800 token tail"| REMOVE["Remove Old Messages<br/>(RemoveMessage)"]
-    REMOVE -->|"Tail + Summary"| LLM
+    SUMMARIZE --> LLM
 
-    LLM --> ROUTE_LLM{"AI has<br/>tool calls?"}
-    
-    ROUTE_LLM -->|"Yes"| SCHEMA["Schema Node:<br/>Database introspection"]
-    ROUTE_LLM -->|"No"| CLEANUP["Cleanup Node:<br/>Prepare for next turn"]
+    LLM --> ROUTE_LLM{"AI message has tool calls?"}
+    ROUTE_LLM -->|"Yes"| TOOLS["Tools Node:<br/>retry + error tracking"]
+    ROUTE_LLM -->|"No"| END["END"]
 
-    SCHEMA --> TOOLS["Tool Node:<br/>Execute with retries"]
-    
-    TOOLS --> ROUTE_TOOLS{"Error?"}
-    ROUTE_TOOLS -->|"Retryable<br/>& retries left"| TOOLS
-    ROUTE_TOOLS -->|"Fatal or<br/>retries exhausted"| ERROR_LLM["Error LLM:<br/>User-friendly message"]
-    ROUTE_TOOLS -->|"Success"| LLM
+    TOOLS --> ROUTE_TOOLS{"Error present?"}
+    ROUTE_TOOLS -->|"Yes & retry_count>0"| TOOLS
+    ROUTE_TOOLS -->|"Yes & retries exhausted"| ERROR_LLM["Error LLM:<br/>user-facing failure"]
+    ROUTE_TOOLS -->|"No"| LLM
 
-    ERROR_LLM --> CLEANUP
-    CLEANUP --> END["END:<br/>Persist to PostgreSQL"]
+    ERROR_LLM --> END
 
-    style START fill:#c8e6c9,stroke:#2e7d32,stroke-width:3px
-    style CHECK_TOKENS fill:#fff9c4,stroke:#f57f17,stroke-width:2px
-    style SUMMARIZE fill:#ffe0b2,stroke:#e65100,stroke-width:2px
-    style REMOVE fill:#ffccbc,stroke:#d84315,stroke-width:2px
+    style START fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    style GET_SCHEMA fill:#b2dfdb,stroke:#00695c,stroke-width:2px
+    style ROUTE_SCHEMA fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style SUMMARIZE fill:#ffe0b2,stroke:#e65100
     style LLM fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    style ROUTE_LLM fill:#e1bee7,stroke:#512da8,stroke-width:2px
-    style SCHEMA fill:#b3e5fc,stroke:#01579b,stroke-width:2px
+    style ROUTE_LLM fill:#ffccbc,stroke:#d84315,stroke-width:2px
     style TOOLS fill:#bbdefb,stroke:#0d47a1,stroke-width:2px
-    style ROUTE_TOOLS fill:#ffccbc,stroke:#d84315,stroke-width:2px
-    style ERROR_LLM fill:#ffebee,stroke:#c62828,stroke-width:2px
-    style CLEANUP fill:#e0f2f1,stroke:#00695c,stroke-width:2px
-    style END fill:#eceff1,stroke:#455a64,stroke-width:3px
+    style ROUTE_TOOLS fill:#ffccbc,stroke:#d84315
+    style ERROR_LLM fill:#ffebee,stroke:#c62828
+    style END fill:#eceff1,stroke:#455a64,stroke-width:2px
 ```
 
-**Sliding Window Flow Explanation**:
-
-1. **Token Check Gate** 🚪: Every turn begins by checking if messages exceed 4500 tokens
-   - **Within limit** (≤4500): Continue normally to LLM
-   - **Exceeds limit** (>4500): Trigger compression pipeline
-
-2. **Compression Pipeline** 🔄:
-   - **Summarization Node**: Compresses old messages into structured action list
-   - **RemoveMessage**: Deletes old messages from state using LangGraph's RemoveMessage
-   - **Preservation**: Keeps ~800 tokens of recent conversation intact
-   - **Result**: State drops from ~4500 → ~800 tokens before continuing
-
-3. **LLM Processing** 🧠:
-   - Receives fresh context (tail messages + summary)
-   - Performs reasoning with bounded context window
-   - Optimal LLM performance without "lost-in-the-middle" issues
-
-4. **Tool Execution Loop** 🔧:
-   - Schema introspection for database queries
-   - Tool execution with intelligent retry (retryable vs fatal)
-   - Auto-limiting of open queries to prevent token explosion
-   - Seamless loop back to LLM for multi-step reasoning
-
-5. **Error Handling** ⚠️:
-   - Retryable errors: Automatic retry with backoff
-   - Fatal errors: Immediate failure with user-friendly message
-   - Exhausted retries: Route to error handler
-
-6. **State Persistence** 💾:
-   - Cleanup node prepares state for database checkpoint
-   - PostgreSQL stores: identity + messages + summary
-   - Next turn loads persisted state (seamless continuation)
-
-**Key Metrics**:
-- **Compression Frequency**: Only when >4500 tokens (not every turn)
-- **Token Preservation**: 800 tokens of context always available
-- **Bounded Memory**: O(1) state size regardless of conversation length
-- **Response Speed**: State recovery sub-50ms from PostgreSQL
-- **Cost Impact**: Predictable, bounded token usage per turn
-
----
-
-### Compression Pipeline: Deep Dive
-
-```mermaid
-sequenceDiagram
-    participant Turn as Turn N<br/>4500+ tokens
-    participant Count as Token Counter
-    participant LLM as Summarization LLM
-    participant Remove as RemoveMessage
-    participant DB as PostgreSQL
-    participant Turn2 as Turn N+1<br/>~800 tokens
-
-    Turn->>Count: count_user_agent_tokens()
-    Count-->>Turn: 5200 tokens ⚠️
-    
-    Turn->>Turn: should_summarize = True
-    Turn->>LLM: Compress messages to actions<br/>(old messages + summary)
-    
-    LLM->>LLM: Process with pydantic parser
-    LLM-->>Turn: new summary<br/>{actions: [...]}
-    
-    Turn->>Remove: Create RemoveMessage<br/>for old messages
-    Remove->>DB: Delete old messages<br/>(add_messages reducer)
-    
-    DB-->>DB: Persist new state
-    DB-->>DB: ID + messages (tail) + summary
-    
-    DB-->>Turn2: Load persisted state<br/>~800 tokens + summary
-```
-
-**State Before/After Compression**:
-
-```
-BEFORE (4500+ tokens):
-┌─────────────────────────────────┐
-│ messages: [                     │
-│   HumanMessage: "Hello",        │
-│   AIMessage: "Hi, how can...",  │
-│   HumanMessage: "Query A",      │ ← Will be compressed
-│   AIMessage: "Result A",        │ ← Will be compressed
-│   HumanMessage: "Query B",      │ ← Will be compressed
-│   AIMessage: "Result B",        │ ← Will be compressed
-│   HumanMessage: "Query C",      │ ← KEPT (tail)
-│   AIMessage: "Result C"         │ ← KEPT (tail)
-│ ]                               │
-│ summary: {}                     │
-└─────────────────────────────────┘
-
-AFTER (compression):
-┌─────────────────────────────────┐
-│ messages: [                     │
-│   HumanMessage: "Query C",      │ ← Tail (800 tokens)
-│   AIMessage: "Result C"         │ ← Tail (800 tokens)
-│ ]                               │
-│ summary: {                      │
-│   actions: [                    │
-│     "Queried database for A",   │
-│     "Retrieved allocation data",│
-│     "Presented results to user",│
-│     "Queried database for B",   │
-│     "Found conflicts",          │
-│   ]                             │
-│ }                               │
-└─────────────────────────────────┘
-
-State Size: 4500 → 800 tokens 🎯
-```
+**Enhanced Flow Explanation**:
+1. **Schema Prefetch**: Always load and cache the DB schema once before reasoning.
+2. **Summarization Gate**: Only compress history when messages ≥10 or tokens >1800.
+3. **LLM Routing**: If the AI message includes tool calls, branch to tools; otherwise finish.
+4. **Tool Execution Loop**: Tools run with retryable vs fatal error tracking; successful runs return to LLM for another step.
+5. **Retry Handling**: While `retry_count` > 0, loop back to tools; when exhausted, route to `error_llm` for a user-friendly fail message.
+6. **Exit Path**: `error_llm` clears error state and ends the graph; normal completions exit directly after LLM when no tools are needed.
 
 ### Intelligent Summarization System
 
@@ -1319,9 +1212,9 @@ State Size: 4500 → 800 tokens 🎯
 
 #### Key Features
 
-1. **Trigger Logic**: Activates when messages exceed ~4500 tokens (configurable)
-2. **LLM Chain**: Uses PydanticOutputParser for robust structured output parsing
-3. **Checkpointer Optimization**: Replaces old message history with single summary marker
+1. **Trigger Logic**: Activates when messages ≥6 or tokens >1800 (configurable)
+2. **LLM Chain**: Uses JsonOutputParser for robust structured output parsing
+3. **Checkpointer Optimization**: Replaces message history with single summary marker
 4. **Fail-Safe**: Graceful degradation - keeps original messages on parsing errors
 
 <details>

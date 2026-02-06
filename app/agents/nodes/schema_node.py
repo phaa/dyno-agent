@@ -3,6 +3,7 @@ from langgraph.runtime import get_runtime
 from agents.stream_writer import get_stream_writer
 from core.cache import schema_cache
 from agents.state import GraphState
+from .utils import reset_error_state, decrement_retry_count
 
 """ import logging
 logging.basicConfig(level=logging.CRITICAL)
@@ -34,6 +35,21 @@ async def get_schema_node(state: GraphState) -> GraphState:
         ORDER BY t.table_name, c.ordinal_position;
     """
     
+    # Query to get unique values from array columns
+    sql_array_values = """
+        SELECT 'dynos' as table_name, 'supported_weight_classes' as column_name, 
+               ARRAY_AGG(DISTINCT unnest ORDER BY unnest) as values
+        FROM (SELECT UNNEST(supported_weight_classes) FROM dynos WHERE supported_weight_classes IS NOT NULL) t
+        UNION ALL
+        SELECT 'dynos' as table_name, 'supported_drives' as column_name,
+               ARRAY_AGG(DISTINCT unnest ORDER BY unnest) as values
+        FROM (SELECT UNNEST(supported_drives) FROM dynos WHERE supported_drives IS NOT NULL) t
+        UNION ALL
+        SELECT 'dynos' as table_name, 'supported_test_types' as column_name,
+               ARRAY_AGG(DISTINCT unnest ORDER BY unnest) as values
+        FROM (SELECT UNNEST(supported_test_types) FROM dynos WHERE supported_test_types IS NOT NULL) t;
+    """
+    
     try:
         result = await db.execute(text(sql_schema))
         rows = result.fetchall()
@@ -44,22 +60,40 @@ async def get_schema_node(state: GraphState) -> GraphState:
                 schema[table_name] = []
             schema[table_name].append(column_name)
 
+        # Get array column values
+        array_values = {}
+        try:
+            array_result = await db.execute(text(sql_array_values))
+            array_rows = array_result.fetchall()
+            for table_name, column_name, values in array_rows:
+                key = f"{table_name}.{column_name}"
+                if values:
+                    array_values[key] = list(values)
+        except Exception:
+            # If array values query fails, continue without them
+            pass
+
         # Convert to compact string representation for prompt efficiency
         schema_str = "\n".join(
             f"{table}: {', '.join(columns)}"
             for table, columns in sorted(schema.items())
         )
+        
+        # Append array values information if available
+        if array_values:
+            schema_str += "\n\n# Array Field Options:\n"
+            for field, values in sorted(array_values.items()):
+                schema_str += f"{field}: {values}\n"
 
         # Cache the result
         schema_cache.set(schema_str)
         return {
             "schema": schema_str,
+            **reset_error_state(),
         }
     except Exception as e:
         return {
-            "retry_count": 0,  # Force immediate error handling
-            "error": str(e),
-            "error_node": "get_schema_node"
+            **decrement_retry_count(state, str(e), "get_schema_node")
         }
     # logger.critical(schema)
 
