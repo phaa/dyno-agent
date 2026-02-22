@@ -78,3 +78,6 @@ resource "aws_iam_role" "ecs_task" {
     ]
   })
 }
+
+# Note: EFS permissions for Prometheus/Grafana are in monitoring.tf.disabled
+# Enable monitoring.tf to use the full monitoring stack

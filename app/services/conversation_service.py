@@ -1,3 +1,4 @@
+from typing import Optional
 import uuid
 import logging
 from fastapi import HTTPException
@@ -21,6 +22,7 @@ class ConversationService:
     - Managing conversation state and persistence
     - Storing and retrieving chat messages with automatic retry
     - Maintaining conversation history with proper ordering
+    - Cleaning up LangGraph checkpointer state with automatic retry
     
     The service is fully isolated from LangChain/LangGraph frameworks,
     enabling clean unit testing and reusability across different interfaces.
@@ -34,18 +36,22 @@ class ConversationService:
     - Non-retryable errors (404, 403) fail immediately
     - Retryable errors (connection failures, timeouts) are retried
     """
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, checkpointer=None):
         """
-        Initializes the conversation service with a database session.
+        Initializes the conversation service with a database session and optional checkpointer.
         
         Args:
             db (AsyncSession): Active SQLAlchemy async database session
                               for all database operations
+            checkpointer (optional): LangGraph checkpointer for thread state management.
+                                    If provided, allows cleanup of checkpointer threads
+                                    during conversation deletion.
         """
         self.db = db
+        self.checkpointer = checkpointer
 
     @async_retry(max_attempts=3, base_delay=0.5, max_delay=5.0)
-    async def get_or_create_conversation(self, user_email: str, conversation_id: str = None):
+    async def get_or_create_conversation(self, user_email: str, conversation_id: Optional[str]):
         """
         Retrieves an existing conversation or creates a new one for the user.
         
@@ -254,6 +260,7 @@ class ConversationService:
         - Verifies the conversation belongs to the authenticated user (authorization)
         - Deletes all messages associated with the conversation (cascades automatically)
         - Deletes the conversation record itself
+        - Cleans up LangGraph checkpointer thread state (if checkpointer is available)
         
         Automatically retries on database transient failures with exponential backoff.
         Non-retryable errors (validation, authorization) fail immediately.
@@ -274,6 +281,11 @@ class ConversationService:
             - Deletes associated messages (via cascade relationship)
             - Deletes the conversation record
             - Uses flush() + commit() for immediate persistence
+            
+        LangGraph Cleanup:
+            - If checkpointer is available, deletes thread state from checkpointer
+            - Uses thread_id format: "{user_email}_{conversation_id}"
+            - Checkpointer cleanup failures are retried but don't fail the operation
             
         Transaction Safety:
             - Automatic rollback on any database errors
@@ -299,6 +311,18 @@ class ConversationService:
             except Exception as e:
                 await self.db.rollback()
                 raise
+            
+            # Clean up LangGraph checkpointer thread state if available
+            if self.checkpointer:
+                thread_id = f"{user_email}_{conversation_id}"
+                try:
+                    # LangGraph checkpointer stores state by thread_id
+                    # adelete_thread() deletes all checkpoints and writes for this thread
+                    await self.checkpointer.adelete_thread(thread_id)
+                    logger.info(f"Deleted thread {thread_id} from checkpointer")
+                except Exception as e:
+                    # Log warning but don't fail the operation - database delete succeeded
+                    logger.warning(f"Failed to delete thread {thread_id} from checkpointer: {str(e)}")
             
             return True
         

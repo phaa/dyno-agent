@@ -2,6 +2,7 @@ from core.prompt_loader import load_prompt
 from agents.state import AgentSummary
 
 # Load versioned prompts from external files
+INTENT_PROMPT = load_prompt("intent_guard", "intent_guard", version="1.0.0")
 SYSTEM = load_prompt("llm_node", "system", version="1.0.0")
 SUMMARY_PROMPT = load_prompt("summarization_node", "summary", version="1.0.1")
 ERROR_PROMPT = load_prompt("error_llm", "system", version="1.0.0")

@@ -10,8 +10,10 @@
 Examples of intentional simplifications:
 - Single-instance ECS services
 - No auto-scaling policies
-- Basic authentication for Grafana
+- Monitoring stack (Prometheus/Grafana) disabled by default (use docker-compose locally)
+- Basic authentication for Grafana (when enabled)
 - Simplified secrets handling for local development
+- NAT Gateway (cost ~$32/month) - consider alternatives for dev/test
 
 All such decisions are **explicit, conscious trade-offs**, not omissions.
 
@@ -22,9 +24,24 @@ All such decisions are **explicit, conscious trade-offs**, not omissions.
 Terraform is used to bootstrap and evolve the production infrastructure.
 
 Its responsibilities include creating and managing long-lived AWS resources such as
-networking (VPC, subnets), compute orchestration (ECS, ALB), persistent storage (RDS, EFS),
+networking (VPC, subnets), compute orchestration (ECS, ALB), persistent storage (RDS),
 IAM roles, and secret containers (AWS Secrets Manager), but not the application secrets
 themselves.
+
+**Core Infrastructure (Always Enabled)**:
+- **ECS Fargate** - FastAPI application (0.5 vCPU, 1GB RAM)
+- **RDS PostgreSQL** - Database (db.t3.micro, 20GB)
+- **ALB** - Application Load Balancer
+- **ECR** - Docker registry
+- **VPC** - Networking with public/private subnets
+- **CloudWatch** - Logs for application
+- **Secrets Manager** - Runtime secrets
+
+**Optional Infrastructure (Disabled by Default)**:
+- **Prometheus + Grafana** - Production monitoring stack (see `monitoring.tf.disabled`)
+- **EFS** - Persistent storage for monitoring data
+
+For local development, use `docker-compose.yml` which includes Prometheus and Grafana.
 
 Application deployments, container builds, and image publishing are handled exclusively
 by the CI/CD pipeline, which updates running services without modifying the underlying
@@ -40,15 +57,26 @@ This separation ensures:
 - Secure secret handling with no dependency on developer machines
 - Repeatable deployments and predictable runtime behavior
 
+## Infrastructure Components
 
-Terraform for deploying Dyno-Agent project on AWS using:
-- **ECS Fargate** (containers - 0.5 vCPU, 1GB RAM)
-- **RDS PostgreSQL** (database - db.t3.micro)
-- **ALB** (load balancer with monitoring paths)
-- **ECR** (Docker registry)
-- **Prometheus + Grafana** (production monitoring stack)
-- **EFS** (persistent storage for monitoring data)
-- **VPC** (networking with public/private subnets)
+### Core Components (Always Deployed)
+- **ECS Fargate**: FastAPI application container (0.5 vCPU, 1GB RAM)
+- **RDS PostgreSQL**: Database (db.t3.micro, 20GB encrypted)
+- **ALB**: Application Load Balancer (HTTP only, path-based routing)
+- **ECR**: Docker container registry
+- **VPC**: Custom VPC with public/private subnets across 2 AZs
+- **NAT Gateway**: Internet access for private subnets
+- **Secrets Manager**: Runtime secrets (DB credentials, API keys)
+- **CloudWatch Logs**: Application logs (7-day retention)
+- **IAM Roles**: ECS execution and task roles
+
+### Optional Components (Disabled by Default)
+- **Prometheus + Grafana**: Production monitoring stack
+- **EFS**: Persistent storage for monitoring data
+
+To enable monitoring stack: `mv infra/monitoring.tf.disabled infra/monitoring.tf`
+
+For development, use the included `docker-compose.yml` with Prometheus and Grafana.
 
 ## Architecture Overview
 
@@ -61,37 +89,39 @@ graph TB
     subgraph "AWS VPC"
         subgraph "Public Subnets"
             ALB[Application Load Balancer]
+            NAT[NAT Gateway]
         end
 
         subgraph "Private Subnets"
             subgraph "ECS Fargate Cluster"
-                FastAPI[FastAPI App]
-                Prometheus[Prometheus]
-                Grafana[Grafana]
+                FastAPI[FastAPI App<br/>0.5 vCPU, 1GB RAM]
             end
 
-            RDS[(RDS PostgreSQL)]
+            RDS[(RDS PostgreSQL<br/>db.t3.micro, 20GB)]
         end
-
-        EFS[EFS Storage]
     end
 
     subgraph "AWS Services"
         ECR[ECR Registry]
         Secrets[Secrets Manager]
-        CloudWatch[CloudWatch Custom Metrics]
+        CloudWatch[CloudWatch Logs]
     end
 
     Users --> ALB
     ALB --> FastAPI
-    ALB --> Prometheus
-    ALB --> Grafana
     FastAPI --> RDS
-    Prometheus --> EFS
-    Grafana --> EFS
     FastAPI --> Secrets
-    MonitoringService[Python Monitoring Service] --> CloudWatch
+    FastAPI --> CloudWatch
+    FastAPI -.-> NAT
+    
+    style FastAPI fill:#e3f2fd
+    style RDS fill:#fff3e0
+    style Secrets fill:#f3e5f5
 ```
+
+**Note**: For monitoring (Prometheus/Grafana), use the local `docker-compose.yml` during development.
+Production monitoring stack is available in `monitoring.tf.disabled` and can be enabled when needed.
+
 ---
 
 ## Configuration & Secrets Strategy
@@ -155,9 +185,14 @@ flowchart LR
 
 ## Quick Setup
 
-### Environment Configuration
+### Prerequisites
+- AWS CLI configured (`aws configure`)
+- Terraform >= 1.3.0
+- Docker (for building and pushing images)
 
-**Automatic Environment Detection**: The system uses a single `PRODUCTION` boolean variable to automatically configure database connections and other environment-specific settings.
+### Deployment Steps
+
+**Environment Configuration**: The system uses a single `PRODUCTION` boolean variable to automatically configure database connections and other environment-specific settings.
 
 ```mermaid
 flowchart TD
@@ -208,70 +243,145 @@ aws configure
 
 2. **Create variables file**:
 ```bash
+cd infra/
 cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars with your values:
-# - db_password
-# - gemini_api_key
-# - jwt_secret
+# - db_password (strong password for RDS)
+# - gemini_api_key (optional, for LLM)
+# - huggingface_token (optional, for models)
+# - jwt_secret (random string for JWT auth)
 ```
 
-3. **Deploy**:
+3. **Deploy infrastructure**:
 ```bash
-cd infra/
 terraform init
-terraform plan
-terraform apply
+terraform plan    # Review changes
+terraform apply   # Type 'yes' to confirm
 ```
 
-4. **Get outputs**:
+4. **Build and push Docker image**:
 ```bash
-terraform output
+# Login to ECR
+$(terraform output -raw ecr_login_command)
+
+# Build and tag image
+cd ../app
+docker build -t dyno-agent .
+docker tag dyno-agent:latest $(cd ../infra && terraform output -raw ecr_repository_url):latest
+
+# Push to ECR
+docker push $(cd ../infra && terraform output -raw ecr_repository_url):latest
 ```
 
-5. **Access services**:
+### Manual Deploy (Without CI/CD)
+
+If you want to test manually (no CI/CD), follow these steps after `terraform apply`:
+
 ```bash
-# Application
+# 1) Login to ECR
+cd infra
+$(terraform output -raw ecr_login_command)
+
+# 2) Build image locally
+cd ../app
+docker build -t dyno-agent .
+
+# 3) Tag image for ECR
+ECR_URL=$(cd ../infra && terraform output -raw ecr_repository_url)
+docker tag dyno-agent:latest "$ECR_URL":latest
+
+# 4) Push image to ECR
+docker push "$ECR_URL":latest
+
+# 5) Force ECS to pull the new image
+aws ecs update-service \
+  --cluster dyno-agent-cluster \
+  --service dyno-agent-service \
+  --force-new-deployment
+
+# 6) Verify health
+curl $(cd ../infra && terraform output -raw application_url)/health
+```
+
+5. **Verify deployment**:
+```bash
+# Get application URL
+terraform output application_url
+
+# Check health
+curl $(terraform output -raw application_url)/health
+
+# View logs
+aws logs tail /ecs/dyno-agent-fastapi --follow
+```
+
+6. **Access application**:
+```bash
 open $(terraform output -raw application_url)
-
-# Monitoring
-open $(terraform output -raw grafana_url)     # admin/admin
-open $(terraform output -raw prometheus_url)
 ```
 
-6. **Cleanup**:
+7. **Cleanup** (when done testing):
 ```bash
-terraform destroy
+terraform destroy  # Type 'yes' to confirm
 ```
 
 ## Important Outputs
 
+After `terraform apply`, you'll get these outputs:
+
+## Important Outputs
+
+After `terraform apply`, you'll get these outputs:
+
 - `application_url` → FastAPI application (http://your-alb-dns.amazonaws.com)
-- `grafana_url` → Grafana dashboard (http://your-alb-dns.amazonaws.com/grafana)
-- `prometheus_url` → Prometheus metrics (http://your-alb-dns.amazonaws.com/prometheus)
-- `ecr_repository_url` → For Docker image push
-- `rds_endpoint` → Database endpoint
+- `ecr_repository_url` → Docker registry URL for image push
+- `ecr_login_command` → Command to login to ECR
+- `rds_endpoint` → Database endpoint (for migrations/debugging)
 - `vpc_id` → VPC ID for reference
 - `private_subnet_ids` → Private subnet IDs
+- `public_subnet_ids` → Public subnet IDs
+- `secret_arn` → Secrets Manager ARN
+- `ecs_cluster_name` → ECS cluster name
+- `ecs_service_name` → ECS service name
+
+**Note**: Prometheus/Grafana URLs are only available if you enable `monitoring.tf`.
 
 ## Current Configuration
 
+### Cost Breakdown (Estimated Monthly)
+- **RDS db.t3.micro**: ~$15/month (20GB storage, no backups)
+- **ECS Fargate** (1 task, 0.5 vCPU, 1GB): ~$8/month
+- **NAT Gateway**: ~$32/month (+ data transfer)
+- **ALB**: ~$20/month (+ data transfer)
+- **Secrets Manager**: ~$0.40/month (1 secret)
+- **CloudWatch Logs**: ~$1/month (7-day retention, low volume)
+
+**Total: ~$75-80/month**
+
+> 💡 **Cost Savings Tip**: Use `terraform destroy` when not actively testing to avoid charges.
+> The entire stack can be recreated in ~10 minutes.
+
+### Monitoring Strategy
+
+**Development (Recommended)**:
+- Use `docker-compose.yml` with Prometheus + Grafana locally
+- Free, fast, easy to use
+- Access at http://localhost:3000 (Grafana) and http://localhost:9090 (Prometheus)
+
+**Production (Optional)**:
+- Enable `monitoring.tf` for ECS-based Prometheus/Grafana
+- Adds ~$20/month (2 ECS tasks + EFS storage)
+- Use CloudWatch for basic monitoring (built-in, low cost)
+- Use CloudWatch Alarms for critical alerts
+
 ### CloudWatch Integration
 
-In addition to Prometheus, the system publishes custom application and business metrics
-directly to Amazon CloudWatch using a dedicated Python monitoring service and the boto3 SDK.
+In addition to CloudWatch, you can use Prometheus for high-frequency metrics during development.
 
 This hybrid approach allows:
-- High-frequency, low-cost metrics via Prometheus
-- Low-frequency, business-critical metrics via CloudWatch
+- High-frequency, low-cost metrics via Prometheus (local)
+- Low-frequency, business-critical metrics via CloudWatch (production)
 - Native AWS alarms and dashboards for key KPIs
-
-### Why Prometheus + CloudWatch (Hybrid)
-
-CloudWatch is used selectively for low-volume, high-value metrics
-(e.g. SLA breaches, error rates, allocation failures).
-
-Prometheus handles high-cardinality, high-frequency metrics
-to avoid excessive CloudWatch costs.
 
 ### ECS Services
 
@@ -279,76 +389,113 @@ to avoid excessive CloudWatch costs.
 - **CPU**: 512 (0.5 vCPU)
 - **Memory**: 1024 MB (1GB)
 - **Desired Count**: 1 instance
-- **Path**: `/` (default)
+- **Path**: `/` (all requests)
+- **Health Check**: `/health` endpoint
+- **Logs**: CloudWatch Logs (/ecs/dyno-agent-fastapi, 7-day retention)
 
-**Prometheus Monitoring**:
-- **CPU**: 512 (0.5 vCPU)
-- **Memory**: 1024 MB (1GB)
-- **Storage**: EFS persistent volume
-- **Path**: `/prometheus`
-- **Retention**: 30 days
-
-**Grafana Dashboard**:
-- **CPU**: 512 (0.5 vCPU)
-- **Memory**: 1024 MB (1GB)
-- **Storage**: EFS persistent volume
-- **Path**: `/grafana`
-- **Auth**: admin/admin
+**Optional Monitoring Services** (disabled by default, see `monitoring.tf.disabled`):
+- Prometheus: 0.5 vCPU, 1GB RAM, EFS storage, path `/prometheus`
+- Grafana: 0.5 vCPU, 1GB RAM, EFS storage, path `/grafana`
 
 ### RDS PostgreSQL
-- **Instance**: db.t3.micro
-- **Engine**: PostgreSQL 15.5
-- **Storage**: 20GB encrypted
-- **No backups** (skip_final_snapshot = true)
-- **Basic monitoring** (CloudWatch integration available)
-
-### EFS Storage
-- **Performance**: General Purpose
-- **Throughput**: Provisioned (20 MiB/s)
-- **Encryption**: Enabled in transit and at rest
-- **Access Points**: Separate for Prometheus and Grafana
+- **Instance**: db.t3.micro (2 vCPU, 1GB RAM)
+- **Engine**: PostgreSQL 14.7 (free tier compatible)
+- **Storage**: 20GB encrypted (GP2)
+- **Backups**: 0 days (free tier limitation) - change to 7+ on paid tier
+- **Subnet**: Private subnets only
+- **Security**: Security group allows ECS only
 
 ### Security
 - **JWT authentication** via AWS Secrets Manager
-- **API keys** stored in Secrets Manager
-- **Private subnets** for all services
-- **Security groups** with path-based access control
-- **EFS encryption** for monitoring data
+- **API keys** stored in Secrets Manager (not in code/configs)
+- **Private subnets** for ECS and RDS (no direct internet access)
+- **Security groups** with least privilege (ECS → RDS only on port 5432)
+- **RDS encryption** at rest (KMS)
+- **Secrets rotation**: Manual (can be automated with Lambda)
+- **Secret recovery**: 0 days (dev/test) - change to 7-30 for production
 
 ## Estimated Costs
 
-### Monthly AWS Costs
-- **RDS t3.micro**: ~$15/month
-- **ECS Fargate (3 services × 0.5 vCPU, 1GB)**: ~$24/month
-- **ALB**: ~$20/month
-- **EFS (monitoring data)**: ~$5/month
-- **Data transfer & storage**: ~$3/month
-- **Total**: ~$67/month
+## Estimated Costs
+
+### Monthly AWS Costs (Core Infrastructure)
+- **RDS db.t3.micro**: ~$15/month (20GB storage)
+- **ECS Fargate** (1 task, 0.5 vCPU, 1GB): ~$8/month
+- **NAT Gateway**: ~$32/month (fixed) + $0.045/GB data transfer
+- **ALB**: ~$20/month (fixed) + $0.008/LCU-hour
+- **ECR**: ~$1/month (500MB storage)
+- **Secrets Manager**: ~$0.40/month (1 secret)
+- **CloudWatch Logs**: ~$1/month (7-day retention, low traffic)
+- **Data Transfer**: ~$2-5/month (varies by usage)
+
+**Total: ~$75-80/month**
+
+### Optional Monitoring Stack (monitoring.tf)
+- **ECS Fargate** (2 additional tasks): +$16/month
+- **EFS**: +$5/month (10GB, provisioned throughput)
+- **ALB routing**: +$2/month (additional LCU usage)
+
+**Total with monitoring: ~$98-103/month**
 
 ### Cost Comparison
-- **With CloudWatch metrics**: +$1,500/month (high-frequency metrics)
-- **Prometheus alternative**: Saves $1,400+/month vs CloudWatch
-- **Hybrid approach**: Use both for different purposes
+- **Without monitoring**: ~$75/month (use CloudWatch + local Prometheus)
+- **With Prometheus/Grafana on ECS**: ~$100/month
+- **CloudWatch Metrics only** (high-frequency): +$500-1,500/month ❌
 
-> 💡 **Tip**: Use `terraform destroy` after testing to avoid costs!
+> 💡 **Recommendation**: Use `docker-compose.yml` for development monitoring (free).
+> Enable production monitoring stack only when you need persistent dashboards in AWS.
 
 ## Production Enhancements
 
-### Monitoring Stack Features
+## Production Enhancements
 
-**Current Implementation**:
-- ✅ **Prometheus + Grafana** deployed on ECS
-- ✅ **EFS persistent storage** for monitoring data
-- ✅ **ALB path-based routing** for secure access
-- ✅ **CloudWatch integration** for enterprise metrics
-- ✅ **Cost-effective alternative** to CloudWatch-only approach
+### Current State
 
-**Monitoring Benefits**:
-- **Cost Savings**: $1,400+/month vs CloudWatch-only
-- **Flexibility**: Custom dashboards and PromQL queries
-- **Persistence**: Data survives container restarts
-- **Security**: Private subnet deployment with ALB access
-- **Scalability**: ECS auto-scaling for monitoring services
+This infrastructure is **production-capable** but **intentionally simplified** for:
+- Learning and demonstration purposes
+- Cost-effective testing and development
+- Easy understanding and modification
+
+**What's included**:
+- ✅ Encrypted database (RDS with encryption at rest)
+- ✅ Private networking (ECS and RDS in private subnets)
+- ✅ Secret management (AWS Secrets Manager)
+- ✅ Application logs (CloudWatch)
+- ✅ Health checks (ALB health checks)
+- ✅ Database backups (7-day retention)
+
+**What's simplified**:
+- ⚠️ Single ECS task (no auto-scaling)
+- ⚠️ HTTP only (no HTTPS/SSL)
+- ⚠️ Single-AZ RDS (no Multi-AZ failover)
+- ⚠️ Basic monitoring (CloudWatch only)
+- ⚠️ No WAF or DDoS protection
+
+### Enabling Production Monitoring Stack
+
+To enable Prometheus + Grafana on AWS:
+
+```bash
+cd infra/
+mv monitoring.tf.disabled monitoring.tf
+
+# Uncomment security groups in security-groups.tf
+# Search for "# resource \"aws_security_group\" \"monitoring\"" and uncomment
+
+terraform plan
+terraform apply
+```
+
+**Benefits**:
+- Persistent metrics across deployments
+- Custom dashboards accessible from anywhere
+- PromQL queries for advanced analysis
+- 30-day retention (configurable)
+
+**Trade-offs**:
+- +$20-25/month additional cost
+- More complex infrastructure
+- Requires EFS management
 
 ### Future Production Enhancements
 
@@ -486,3 +633,67 @@ aws rds describe-db-instances \
   --db-instance-identifier dyno-agent-db \
   --query 'DBInstances[0].DBInstanceStatus'
 ```
+
+---
+
+## Common Issues & Troubleshooting
+
+### 1. Secret Already Exists Error
+
+**Problem**: `terraform apply` fails with "secret already exists"
+
+**Solution**:
+```bash
+# Force delete (dev/test only)
+aws secretsmanager delete-secret \
+  --secret-id dyno-agent-secrets \
+  --force-delete-without-recovery
+```
+
+### 2. ECS Task Not Starting
+
+**Diagnosis**:
+```bash
+# Check logs
+aws logs tail /ecs/dyno-agent-fastapi --follow
+
+# List tasks
+aws ecs list-tasks --cluster dyno-agent-cluster
+```
+
+**Common Causes**:
+- Docker image not pushed to ECR → Run `terraform output -raw ecr_login_command`
+- Secrets not populated → Check AWS Secrets Manager
+- Database connection failed → Verify security groups
+
+### 3. High NAT Gateway Costs
+
+**Solutions**:
+- Use VPC endpoints for AWS services (S3, ECR)
+- Reduce unnecessary outbound traffic
+- Consider NAT instances for dev/test
+
+### 4. Cannot Access Application
+
+**Diagnosis**:
+```bash
+# Check target health
+aws elbv2 describe-target-health \
+  --target-group-arn $(aws elbv2 describe-target-groups \
+    --names dyno-agent-tg --query 'TargetGroups[0].TargetGroupArn' --output text)
+```
+
+**Solutions**:
+- Wait 2-3 minutes after deployment for health checks
+- Verify ECS task is running: `aws ecs list-tasks --cluster dyno-agent-cluster`
+- Check application logs in CloudWatch
+
+---
+
+## Additional Resources
+
+- [infra/README.md](../infra/README.md) - Quick reference guide
+- [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) - Detailed troubleshooting
+- [CICD.md](./CICD.md) - Automated deployment
+- [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+- [ECS Best Practices](https://docs.aws.amazon.com/AmazonECS/latest/bestpracticesguide/intro.html)

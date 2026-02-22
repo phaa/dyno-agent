@@ -1,0 +1,276 @@
+[MASTER]
+# Add files or directories to the blacklist. They should be base names, not paths.
+ignore=tests,migrations,__pycache__
+
+# Pickle collected data for later comparisons
+persistent=yes
+
+# Load extension modules
+load-plugins=
+
+# Set the output format. Available formats are text, parseable, colorized, json and msvs (visual studio).
+output-format=colorized
+
+# List of module names for which member attributes should not be checked
+extension-pkg-allow-list=
+
+# Specify a score threshold to be exceeded before program exits with error
+fail-under=10.0
+
+# Minimum lines number d'une function to be considered as too complex
+min-similarity-lines=4
+
+# The minimum memory, in megabytes, for the pylint process to continue parsing
+limit-inference-results=100
+
+# Tracks internally if the user has overridden the default value to something
+user-provided-config=
+
+[MESSAGES CONTROL]
+# Only show warnings with the listed confidence levels. Leave empty to show all.
+confidence=
+
+# Disable the message, report, category or checker with the given id(s).
+disable=
+    missing-docstring,
+    too-few-public-methods,
+    too-many-arguments,
+    too-many-locals,
+    too-many-instance-attributes,
+    fixme,
+    no-else-return,
+    invalid-name,
+    consider-using-f-string,
+    redefined-builtin,
+    redefined-outer-name,
+    unused-argument,
+
+# Enable the message, report, category or checker with the given id(s).
+enable=c-extension-no-member
+
+[REPORTS]
+# Set the output format. Available formats are text, parseable, colorized, json and msvs (visual studio).
+reports=no
+
+# Tells whether to display a full report or only the messages
+score=no
+
+[REFACTORING]
+# Maximum number of nested blocks for function / method body
+max-nested-blocks=5
+
+[BASIC]
+# Naming style matching correct attribute names
+attr-naming-style=snake_case
+
+# Naming style matching correct argument names
+argument-naming-style=snake_case
+
+# Naming style matching correct class attribute names
+class-attribute-naming-style=any
+
+# Naming style matching correct class names
+class-naming-style=PascalCase
+
+# Naming style matching correct constant names
+const-naming-style=UPPER_CASE
+
+# Naming style matching correct function names
+function-naming-style=snake_case
+
+# Naming style matching correct method names
+method-naming-style=snake_case
+
+# Naming style matching correct module names
+module-naming-style=snake_case
+
+# Naming style matching correct variable names
+variable-naming-style=snake_case
+
+# Regular expression matching correct attribute names
+attr-rgx=(([a-z_][a-z0-9_]*)|(_[a-z0-9_]*))
+
+# Regular expression matching correct argument names
+argument-rgx=(([a-z_][a-z0-9_]*)|(_[a-z0-9_]*))
+
+# Regular expression matching correct class attribute names
+class-attr-rgx=(([a-z_][a-z0-9_]*)|(_[a-z0-9_]*)|(__.*__))
+
+# Regular expression matching correct constant names
+const-rgx=((_{0,2}[A-Z][A-Z0-9_]*)|(__.*__)|(_[a-z0-9_]*))
+
+# Regular expression matching correct function names
+function-rgx=(([a-z_][a-z0-9_]*)|(_[a-z0-9_]*))
+
+# Regular expression matching correct method names
+method-rgx=(([a-z_][a-z0-9_]*)|(_[a-z0-9_]*))
+
+# Regular expression matching correct module names
+module-rgx=(([a-z_][a-z0-9_]*)|(_[a-z0-9_]*))
+
+# Regular expression matching correct variable names
+variable-rgx=(([a-z_][a-z0-9_]*)|(_[a-z0-9_]*))
+
+# Good variable names which should always be accepted, separated by a comma
+good-names=i,j,k,ex,Run,_
+
+# Bad variable names which should always be rejected, separated by a comma
+bad-names=foo,bar,baz,toto,tutu,tata
+
+# Colon-delimited sets of names that determine each other's naming style when
+# the name regexes allow several styles.
+name-group=
+
+# Include a hint for the correct naming format with invalid-name
+include-naming-hint=no
+
+# List of decorators that produce properties, such as abc.abstractproperty. Add
+# to this list to register other decorators that produce valid properties.
+property-classes=abc.abstractproperty
+
+# Naming style matching correct inlined variable names
+inlined-variable-naming-style=any
+
+# Required attributes for module, separated by a comma
+required-attributes=
+
+# String used as indentation unit. This is usually "    " (4 spaces) or "\t" (1
+# tab).
+indent-string='    '
+
+# Number of spaces of indent required inside a hanging or continued line.
+indent-after-paren=4
+
+# Expected format of line ending, especially useful when checking scripts as
+# they are prone to have the wrong line ending convention.
+expected-line-ending-format=
+
+[FORMAT]
+# Maximum number of characters on a single line.
+max-line-length=100
+
+# Regexp for a line that is allowed to be longer than the limit.
+long-lines-check-limit=yes
+
+# Allow the body of an if to be on the same line as the test if there is no
+# else.
+single-line-if-stmt=no
+
+# List of optional constructs whose body length doesn't count towards the
+# limit.
+no-space-check=trailing-comma,before-colon
+
+# Maximum number of lines in a module
+max-module-lines=1000
+
+# String used as indentation unit. This is usually "    " (4 spaces) or "\t" (1
+# tab).
+indent-string='    '
+
+# Number of spaces of indent required inside a hanging or continued line.
+indent-after-paren=4
+
+# Expected format of line ending, especially useful when checking scripts as
+# they are prone to have the wrong line ending convention.
+expected-line-ending-format=
+
+# Regexp for a line that is allowed to be longer than the limit.
+long-lines-ignores=^\s*(# )?<?https?://\S+>?$
+
+[LOGGING]
+# The type of string formatting that logging methods do. `old` for %
+# formatting, `new` for {} formatting,`fstring` for f-strings:
+logging-format-style=old
+
+# Format template used to check logging format string.
+logging-modules=logging
+
+[SIMILARITIES]
+# Ignore comments and docstrings when computing similarities.
+ignore-comments=yes
+
+# Ignore docstrings and comments when computing similarities.
+ignore-docstrings=yes
+
+# Minimum lines number d'une function to be considered as too complex
+min-similarity-lines=4
+
+[DESIGN]
+# Maximum number of arguments for function / method
+max-args=5
+
+# Maximum number of attributes for a class
+max-attributes=7
+
+# Maximum number of boolean expressions in an if statement
+max-bool-expr=5
+
+# Maximum number of branch for function / method body
+max-branches=12
+
+# Maximum number of locals for function / method body
+max-locals=15
+
+# Maximum number of parents for a class (see R0901).
+max-parents=7
+
+# Maximum number of public methods for a class
+max-public-methods=20
+
+# Maximum number of return / yield for function / method body.
+max-returns=6
+
+# Maximum number of statements in function / method body
+max-statements=50
+
+# Minimum number of public methods for a class
+min-public-methods=2
+
+[CLASSES]
+# List of method names used to declare an abstract method.
+defining-attr-methods=__init__,__new__,setUp
+
+# List of member names, which should be excluded from the protected access
+# warning.
+exclude-protected=_asdict,_fields,_make,_replace,_source,_get_current_stack,_get_object_tracker
+
+# List of valid names for the first argument in a class method.
+valid-classmethod-first-arg=cls
+
+# List of valid names for the first argument in a metaclass class method.
+valid-metaclass-classmethod-first-arg=cls
+
+# List of member names, which should be excluded from the protected access
+# warning.
+exclude-protected=_asdict,_fields,_make,_replace,_source,_get_current_stack,_get_object_tracker
+
+[IMPORTS]
+# List of modules that can be imported at any level, not just the top level
+# one.
+allow-wildcard-with-all=no
+
+# Analyse import fallback blocks. This can be used to support both Python 2 and
+# 3 compatible code, which means that the imports must be in the same block
+# (for example requires on same Python version).
+analyse-fallback-blocks=no
+
+# Create a graph of every (a -> b) import Edge, and store it in the given
+# file (report RP0402 must not be disabled by the user).
+import-graph=
+
+# Create a graph of every module this module depends on and put it in the
+# given file (report RP0402 must not be disabled by the user).
+ext-import-graph=
+
+# Create a graph of every (i -> j) match for every module i in this package.
+int-import-graph=
+
+# Force import order to recognize a module as part of a local package
+force-single-line=no
+
+# A list of preferred modules and their aliases.
+preferred-modules=
+
+[EXCEPTIONS]
+# Exceptions that will emit a warning when being caught. Defaults to "Exception"
+overgeneral-exceptions=Exception

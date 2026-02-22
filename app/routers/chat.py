@@ -2,8 +2,7 @@ import asyncio
 import json
 import time
 import logging
-from dataclasses import dataclass
-from typing import AsyncGenerator, Any
+from typing import AsyncGenerator, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -11,7 +10,7 @@ from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.graph import build_graph
-from agents.config import ERROR_RETRY_COUNT
+from agents.config import DEFAULT_ERROR_RETRY_COUNT
 from services.conversation_service import ConversationService
 from auth.auth_bearer import JWTBearer
 from auth.auth_handler import get_user_email_from_token
@@ -25,10 +24,6 @@ from models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
-
-@dataclass
-class UserContext:
-    db: AsyncSession
 
 def _get_checkpointer(request: Request):
     return request.app.state.checkpointer
@@ -83,6 +78,14 @@ async def _get_graph(
     return graph
 
 def sse(payload: dict) -> str:
+    """Format a dict payload as a Server-Sent Event data block.
+
+    Args:
+        payload: JSON-serializable dictionary to send as SSE `data`.
+
+    Returns:
+        A string containing the SSE-formatted data line(s).
+    """
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 @router.post("/stream", dependencies=[Depends(JWTBearer())], tags=["chat"])
@@ -94,49 +97,20 @@ async def chat_stream(
     db: AsyncSession = Depends(get_db),
     graph = Depends(_get_graph),
 ) -> StreamingResponse:
-    """
-    Stream chat responses over Server-Sent Events (SSE) using LangGraph.
+    """Stream chat responses over SSE using the LangGraph workflow.
 
-    This endpoint:
-      1) Authenticates the user via JWT.
-      2) Gets or creates a conversation for the user.
-      3) Persists the incoming user message (best-effort).
-      4) Executes a LangGraph workflow and streams events to the client:
-         - type="status": progress updates emitted via the graph "custom" stream.
-         - type="assistant": assistant responses emitted via the graph "updates" stream.
-      5) Deduplicates assistant messages by message id.
-      6) Persists the final assistant response once at the end (single DB write).
-      7) Tracks conversation metrics (duration, etc.).
-      8) Always terminates the SSE stream by sending data: [DONE].
+    Produces `status` and `assistant` SSE events, deduplicates assistant
+    messages by id, persists the final assistant response once, and tracks
+    conversation metrics. The graph receives an `input` dict which includes
+    a `retry_count` value initialized from `ERROR_RETRY_COUNT`.
 
-    Streaming format:
-        Each event is sent as an SSE "data" line containing a JSON payload:
-            {"type": "...", "content": ...}
-
-        The stream ends with:
-            data: [DONE]
-
-    Args:
-        chat_request: Request payload containing the user message and optional
-            conversation_id.
-        request: FastAPI request object (used for auth context and disconnect
-            detection).
-        db: Async SQLAlchemy session.
-        graph: Cached LangGraph instance (injected via get_graph).
-
-    Returns:
-        StreamingResponse: A text/event-stream response producing SSE events.
-
-    Raises:
-        HTTPException:
-            - 400 if the conversation cannot be started due to a non-retryable
-              error or the conversation does not belong to the authenticated user.
-            - 404 if the user record is not found.
-            - 500 if the chat session cannot be initialized.
+    Streaming format: each SSE `data` line contains a JSON payload
+    of the form {"type": "...", "content": ...}. The stream always ends
+    with the sentinel `data: [DONE]`.
     """
     user_email = get_user_email_from_token(request)
-    user_message: str = chat_request.message
-    conv_id: str | None = chat_request.conversation_id
+    user_message = chat_request.message
+    conv_id = chat_request.conversation_id
 
     conv_service = ConversationService(db=db)
 
@@ -157,13 +131,14 @@ async def chat_stream(
     if conversation.user_email != user_email:
         raise HTTPException(status_code=400, detail="User doesn't exist.")
 
-    conversation_id = conversation.id # Avoid async closure issues by capturing conversation_id in a local variable
+    # Avoid async closure issues by capturing conversation_id in a local variable
+    conversation_id = conversation.id 
     user_name = user.fullname.split()[0]
 
-    async def event_generator() -> AsyncGenerator[str, None]:
+    async def event_generator() -> AsyncGenerator:
         start_time = time.time()
-        last_ai_message_id: str | None = None
-        final_assistant_response: str | None = None
+        last_ai_message_id: Optional[str] = None
+        final_assistant_response: Optional[str] = None
 
         try:
             try:
@@ -181,10 +156,10 @@ async def chat_stream(
                 "user_input": user_message, 
                 "user_name": user_name,
                 "conversation_id": conversation_id,
-                "retry_count": ERROR_RETRY_COUNT,  # Initial retry count
+                "retry_count": DEFAULT_ERROR_RETRY_COUNT, 
             }
             config = {"configurable": {"thread_id": f"{user_email}_{conversation_id}"}}
-            context = UserContext(db=db)
+            context = {"db": db}
 
             stream_args = {
                 "input": inputs,
@@ -224,35 +199,34 @@ async def chat_stream(
                         if not msg:
                             continue
 
+                        # We must avoid duplicate messages due to checkpointing
                         if msg.id == last_ai_message_id:
                             continue
                         
                         last_ai_message_id = msg.id
 
                         if isinstance(msg.content, list):
-                            contents = [
-                                item.get("text", "")
-                                for item in msg.content
-                                if isinstance(item, dict) and item.get("type") == "text"
-                            ]
-                            response_text = "\n".join([c for c in contents if c])
+                            response_text = ""
+                            for item in msg.content:
+                                if isinstance(item, dict) and item.get("type") == "text":
+                                    response_text += item.get("text", "")
                         else:
                             response_text = msg.content
 
                         final_assistant_response = response_text
                         yield sse({"type": "assistant", "content": response_text})
 
-                except Exception:
-                    logger.exception("Error processing stream chunk")
+                except Exception as e:
+                    logger.exception(f"Error processing stream chunk: {str(e)}")
                     yield sse({"type": "error", "content": "Error processing response. Please try again."})
 
         except asyncio.CancelledError:
             # important for streaming: the client can cancel the request
-            logger.info(f"Stream cancelled: user={user_email} conv={conversation_id}")
+            logger.info(f"Stream cancelled")
             raise
-        except Exception:
+        except Exception as e:
             logger.exception(
-                "Critical error in chat stream",
+                f"Critical error in chat stream: {str(e)}",
                 extra={"user_email": user_email, "conversation_id": conversation_id},
             )
             yield sse({"type": "error", "content": "Critical error occurred. Our team has been notified."})
@@ -265,8 +239,8 @@ async def chat_stream(
                         role="assistant",
                         content=final_assistant_response,
                     )
-            except Exception:
-                logger.exception("Failed to save assistant response")
+            except Exception as e:
+                logger.exception(f"Failed to save assistant response: {str(e)}")
 
             try:
                 if final_assistant_response:
@@ -280,8 +254,8 @@ async def chat_stream(
                         duration_ms=duration_ms,
                         tools_used=[], # todo
                     )
-            except Exception:
-                logger.exception("Failed to track conversation metrics")
+            except Exception as e:
+                logger.exception(f"Failed to track conversation metrics: {str(e)}")
 
             yield "data: [DONE]\n\n"
 
@@ -303,11 +277,11 @@ async def get_conversation_metrics(hours: int = 24, db: AsyncSession = Depends(g
 
 
 @router.get("/conversations", dependencies=[Depends(JWTBearer())], tags=["chat"])
-async def get_conversation_messages(
+async def list_conversations(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """Get messages from a specific conversation for the authenticated user."""
+    """List conversations for the authenticated user."""
     user_email = get_user_email_from_token(request)
     conv_service = ConversationService(db=db)
     
@@ -348,19 +322,15 @@ async def delete_conversation(
     checkpointer = Depends(_get_checkpointer),
 ):
     """
-    Delete a conversation and all its associated messages.
-    
-    This endpoint:
-    1. Authenticates the user via JWT
-    2. Verifies the conversation belongs to the authenticated user
-    3. Deletes the conversation and all messages from SQLAlchemy database
-    4. Deletes the thread from the LangGraph checkpointer
+    Delete a conversation and all its associated messages:
+    - Deleting the conversation and all messages from SQLAlchemy database
+    - Deleting the thread from the LangGraph checkpointer (with automatic retry)
     
     Args:
         conversation_id: UUID of the conversation to delete
         request: FastAPI request object for authentication
         db: Async SQLAlchemy session
-        checkpointer: LangGraph checkpointer for thread cleanup
+        checkpointer: LangGraph checkpointer (passed to service)
         
     Returns:
         Dictionary with success status
@@ -371,25 +341,15 @@ async def delete_conversation(
             - 500 if the conversation cannot be deleted due to database error
     """
     user_email = get_user_email_from_token(request)
-    conv_service = ConversationService(db=db)
+    conv_service = ConversationService(db=db, checkpointer=checkpointer)
     
     try:
-        # Delete conversation and all messages from database
+        # Delete conversation and all messages from database, plus checkpointer cleanup
+        # with automatic retry on transient failures
         await conv_service.delete_conversation(
             conversation_id=conversation_id,
             user_email=user_email
         )
-        
-        # Delete the thread from checkpointer
-        thread_id = f"{user_email}_{conversation_id}"
-        try:
-            # LangGraph checkpointer stores state by thread_id
-            # adelete_thread() deletes all checkpoints and writes for this thread
-            await checkpointer.adelete_thread(thread_id)
-            logger.info(f"Deleted thread {thread_id} from checkpointer")
-        except Exception as e:
-            logger.warning(f"Failed to delete thread {thread_id} from checkpointer: {str(e)}")
-            # Don't fail the entire operation if checkpointer cleanup fails
         
         return {"status": "success", "message": f"Conversation {conversation_id} deleted successfully"}
         

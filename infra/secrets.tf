@@ -1,5 +1,9 @@
 resource "aws_secretsmanager_secret" "api" {
   name = "${var.project_name}-secrets"
+  
+  # Allow immediate recreation after destroy (dev/test only)
+  # For production, use 7-30 days for safety
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "api" {
@@ -13,9 +17,11 @@ resource "aws_secretsmanager_secret_version" "api" {
 
     # SQLAlchemy - asyncpg driver
     DATABASE_URL_PROD = "postgresql+asyncpg://${aws_db_instance.postgres.username}:${var.db_password}@${aws_db_instance.postgres.endpoint}/${aws_db_instance.postgres.db_name}"
+    DATABASE_URL      = "postgresql+asyncpg://${aws_db_instance.postgres.username}:${var.db_password}@${aws_db_instance.postgres.endpoint}/${aws_db_instance.postgres.db_name}"
     
     # LangGraph Checkpointer - psycopg2 driver
     DATABASE_URL_CHECKPOINTER_PROD = "postgresql://${aws_db_instance.postgres.username}:${var.db_password}@${aws_db_instance.postgres.endpoint}/${aws_db_instance.postgres.db_name}?sslmode=require"
+    DATABASE_URL_CHECKPOINTER      = "postgresql://${aws_db_instance.postgres.username}:${var.db_password}@${aws_db_instance.postgres.endpoint}/${aws_db_instance.postgres.db_name}?sslmode=require"
     
     POSTGRES_USER     = aws_db_instance.postgres.username
     POSTGRES_PASSWORD = var.db_password

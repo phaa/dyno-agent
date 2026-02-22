@@ -89,6 +89,19 @@ class LLMFactory:
             temperature=0.0,
             max_tokens=400,
         )
+        
+    def get_intent_llm(self):
+        if self._provider == "local":
+            # vLLM forces tool calling, so disable tools explicitly for intent guard case
+            return self._setup_llm(
+                temperature=0.0,
+                max_tokens=100,
+            ).bind_tools([])
+        
+        return self._setup_llm(
+            temperature=0.0,
+            max_tokens=100,
+        )
 
     def get_llm_with_tools(self, tools: list):
         return self.get_llm().bind_tools(tools)

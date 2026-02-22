@@ -10,10 +10,10 @@ class SchemaCache:
     
     def __init__(self, ttl_seconds: int = 3600):  # 1 hour default
         self.ttl_seconds = ttl_seconds
-        self._cache: Optional[Dict[str, Any]] = None
+        self._cache: Optional[str] = None
         self._timestamp: Optional[float] = None
     
-    def get(self) -> Optional[Dict[str, Any]]:
+    def get(self) -> Optional[str]:
         """Get cached schema if valid."""
         if not self._cache or not self._timestamp:
             return None
@@ -27,11 +27,11 @@ class SchemaCache:
         logger.info("Using cached schema")
         return self._cache
     
-    def set(self, schema: Dict[str, Any]) -> None:
+    def set(self, schema: str) -> None:
         """Cache the schema."""
         self._cache = schema
         self._timestamp = time.time()
-        logger.info(f"Schema cached with {len(schema)} tables")
+        logger.info(f"Schema cached with {len(schema)} characters")
     
     def invalidate(self) -> None:
         """Manually invalidate cache."""

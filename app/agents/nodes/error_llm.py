@@ -1,4 +1,6 @@
+from typing import Literal
 from langchain_core.messages import SystemMessage
+from langgraph.types import Command
 from agents.state import GraphState
 from agents.llm_factory import LLMFactory
 from agents.config import PROVIDER
@@ -13,8 +15,12 @@ logging.basicConfig(level=logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
 
-async def error_llm(state: GraphState):
-    """LLM node for error handling."""
+async def error_llm(state: GraphState) -> Command[Literal["__end__"]]:
+    """LLM node for graceful error handling.
+    
+    Routing Logic:
+    - Always ends graph: Always routes to END after error message generation
+    """
     
     error = state.get("error")
     error_node = state.get("error_node")
@@ -45,12 +51,17 @@ async def error_llm(state: GraphState):
             }
         )
         
-        return {
-            "messages": [ai],
-            "error": None,  # Clear error state
-            "error_node": None,
-            "retry_count": 2 
-        }
+        return Command(
+            update={
+                "messages": [ai],
+                "error": None,  # Clear error state
+                "error_node": None,
+                "retry_count": 2 
+            },
+            goto="__end__"
+        )
     except Exception as e:
         logger.error(f"Error in error_llm node: {str(e)}")
+        # Fail safe - still end the graph
+        return Command(update={}, goto="__end__")
 

@@ -1,0 +1,22 @@
+{
+  "python.linting.enabled": true,
+  "python.linting.pylintEnabled": true,
+  "python.linting.pylintUseMinimalCheckers": false,
+  "python.linting.pylintPath": "${workspaceFolder}/venv/bin/pylint",
+  "python.linting.pylintArgs": [
+    "--load-plugins=pylint_django"
+  ],
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.python",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    }
+  },
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/app"
+  ],
+  "python.analysis.diagnosticsMode": "workspace",
+  "python.analysis.typeCheckingMode": "basic"
+}

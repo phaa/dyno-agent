@@ -7,15 +7,16 @@ output "application_url" {
   value       = "http://${aws_lb.main.dns_name}"
 }
 
-output "prometheus_url" {
-  description = "URL to access Prometheus in production"
-  value       = "http://${aws_lb.main.dns_name}/prometheus"
-}
-
-output "grafana_url" {
-  description = "URL to access Grafana in production"
-  value       = "http://${aws_lb.main.dns_name}/grafana"
-}
+# Note: Prometheus/Grafana outputs are disabled. To enable monitoring stack,
+# rename monitoring.tf.disabled to monitoring.tf and uncomment outputs below:
+# output "prometheus_url" {
+#   description = "URL to access Prometheus in production"
+#   value       = "http://${aws_lb.main.dns_name}/prometheus"
+# }
+# output "grafana_url" {
+#   description = "URL to access Grafana in production"
+#   value       = "http://${aws_lb.main.dns_name}/grafana"
+# }
 
 output "ecr_repository_url" {
   value = aws_ecr_repository.fastapi.repository_url
@@ -51,17 +52,35 @@ output "ecs_cluster_name" {
   value       = aws_ecs_cluster.main.name
 }
 
-output "ecs_service_name" {
-  description = "ECS service name"
-  value       = aws_ecs_service.fastapi.name
-}
-
 output "vpc_id" {
-  value = aws_vpc.main.id
+  description = "VPC ID for reference"
+  value       = aws_vpc.main.id
 }
 
 output "private_subnet_ids" {
-  value = aws_subnet.private[*].id
+  description = "Private subnet IDs"
+  value       = aws_subnet.private[*].id
+}
+
+output "public_subnet_ids" {
+  description = "Public subnet IDs"
+  value       = aws_subnet.public[*].id
+}
+
+output "secret_arn" {
+  description = "ARN of the secrets manager secret"
+  value       = aws_secretsmanager_secret.api.arn
+  sensitive   = true
+}
+
+output "ecr_login_command" {
+  description = "Command to login to ECR"
+  value       = "aws ecr get-login-password --region ${var.region} | docker login --username AWS --password-stdin ${aws_ecr_repository.fastapi.repository_url}"
+}
+
+output "ecs_service_name" {
+  description = "ECS service name for the FastAPI application"
+  value       = aws_ecs_service.fastapi.name
 }
 
 output "security_group_rds_id" {

@@ -23,44 +23,28 @@ class GraphState(TypedDict):
     Enhanced graph state with sliding window message management.
     
     Message Management:
-    - **messages**: Full conversation history with sliding window
+    - messages: Full conversation history with sliding window
       - Grows until ~4-5K tokens (AI + Human messages only)
       - Auto-summarizes when limit exceeded
       - Maintains ~800 token tail for context after summarization
     
     Error Handling:
-    - **retry_count**: Remaining retry attempts (default: 2)
-    - **error**: Current error message for debugging and user feedback
-    - **error_node**: Which node failed (enables targeted retry strategies)
+    - retry_count: Remaining retry attempts (default: 2)
+    - error: Current error message for debugging and user feedback
+    - error_node: Which node failed (enables targeted retry strategies)
     
     Retry Strategy:
     - RetryableException: Decrements retry_count and attempts again
     - FatalException: Immediately fails without retry
     - Zero retry_count: Routes to graceful error handler
-    
-    Benefits:
-    - Automatic recovery from transient failures (network, timeouts)
-    - Fast failure for permanent errors (auth, validation)
-    - Comprehensive error tracking for monitoring and debugging
-    - Graceful degradation when all retries exhausted
+
     """
-    # Identity
     conversation_id: str
     user_name: str
-
-    # Memory (persisted)
     summary: AgentSummary
-
-    # Messages (persisted with sliding window)
     messages: Annotated[list[BaseMessage], add_messages]
-
-    # Input (ephemeral)
     user_input: str
-
-    # Errors (ephemeral) - retry_count com default é gerenciado no graph
-    retry_count: Optional[int]
+    retry_count: int
     error: Optional[str]
     error_node: Optional[str]
-
-    # DB (ephemeral)
     schema: Optional[dict]

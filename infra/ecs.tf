@@ -45,6 +45,16 @@ resource "aws_lb_listener" "http" {
 
 
 ############################
+# CloudWatch Log Group
+############################
+
+resource "aws_cloudwatch_log_group" "fastapi" {
+  name              = "/ecs/${var.project_name}-fastapi"
+  retention_in_days = 7
+}
+
+
+############################
 # ECS Cluster
 ############################
 
@@ -90,8 +100,16 @@ resource "aws_ecs_task_definition" "fastapi" {
           valueFrom = "${aws_secretsmanager_secret.api.arn}:GEMINI_API_KEY::"
         },
         {
+          name      = "DATABASE_URL"
+          valueFrom = "${aws_secretsmanager_secret.api.arn}:DATABASE_URL::"
+        },
+        {
           name      = "DATABASE_URL_PROD"
           valueFrom = "${aws_secretsmanager_secret.api.arn}:DATABASE_URL_PROD::"
+        },
+        {
+          name      = "DATABASE_URL_CHECKPOINTER"
+          valueFrom = "${aws_secretsmanager_secret.api.arn}:DATABASE_URL_CHECKPOINTER::"
         },
         {
           name      = "DATABASE_URL_CHECKPOINTER_PROD"
@@ -102,6 +120,15 @@ resource "aws_ecs_task_definition" "fastapi" {
           valueFrom = "${aws_secretsmanager_secret.api.arn}:JWT_SECRET::"
         }
       ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.fastapi.name
+          "awslogs-region"        = var.region
+          "awslogs-stream-prefix" = "ecs"
+        }
+      }
     }
   ])
 }
@@ -131,5 +158,8 @@ resource "aws_ecs_service" "fastapi" {
     container_port   = 8000
   }
 
-  depends_on = [aws_lb_listener.http]
+  depends_on = [
+    aws_lb_listener.http,
+    aws_secretsmanager_secret_version.api
+  ]
 }
